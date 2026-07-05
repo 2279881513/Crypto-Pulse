@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.DS_Store
+reasonix.toml
+.reasonix/
+*.parquet
+*.csv
+.env

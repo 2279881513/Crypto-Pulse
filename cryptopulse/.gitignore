@@ -1,0 +1,28 @@
+# CryptoPulse — 单币种智能交易决策系统
+# 短 · 快 · 准
+
+.Python
+__pycache__/
+*.pyc
+.env
+*.egg-info/
+dist/
+build/
+
+# Data
+data/*.parquet
+data/*.feather
+data/*.db
+data/raw/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

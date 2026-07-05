@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoPulse — 交易信号</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-top">
+                <div class="header-left">
+                    <span class="logo">CryptoPulse <span class="logo-sub">交易决策</span></span>
+                    <span class="style-toggle">
+                        <button class="style-btn" id="btn-short" onclick="switchStyle('short_term')">短线 1m</button>
+                        <button class="style-btn" id="btn-medium" onclick="switchStyle('medium_term')">中线 4h</button>
+                    </span>
+                    <a href="/chart" class="nav-link">📊 K线</a>
+                </div>
+                <div class="header-actions">
+                    <span class="refresh-note" id="countdown-label"></span>
+                    <button class="btn btn-history" onclick="toggleHistory()">📋 记录</button>
+                    <button class="btn btn-primary" onclick="manualRefresh()">🔄 刷新</button>
+                </div>
+            </div>
+        </header>
+
+        <div class="settings-bar">
+            <div class="setting-group">
+                <label>本金</label>
+                <input type="number" id="capital" value="1000" min="10" step="100">
+            </div>
+            <div class="setting-group">
+                <label>杠杆</label>
+                <input type="number" id="leverage" value="1" min="1" max="125" step="1">
+            </div>
+            <div class="setting-group">
+                <label>手续费</label>
+                <select id="fee-rate">
+                    <option value="0.0005">0.05%</option>
+                    <option value="0.0002">0.02%</option>
+                    <option value="0.001">0.10%</option>
+                    <option value="0.0008">0.08%</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="main-content"><div class="loading">加载中...</div></div>
+
+        <footer>⚠️ 本信号仅供参考，不构成投资建议。交易风险极高，请自行承担。</footer>
+    </div>
+
+<script>
+const SETTINGS_KEY = 'cryptopulse_settings';
+const INIT_STYLE = '{{ style }}';
+let currentStyle = INIT_STYLE;
+let signalData = null;
+let isLoading = false;
+
+function loadSettings() {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) try {
+        const s = JSON.parse(saved);
+        document.getElementById('capital').value = s.capital || 1000;
+        document.getElementById('leverage').value = s.leverage || 1;
+        document.getElementById('fee-rate').value = s.feeRate || '0.0005';
+    } catch(e) {}
+}
+function saveSettings() {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        capital: parseFloat(document.getElementById('capital').value) || 1000,
+        leverage: parseFloat(document.getElementById('leverage').value) || 1,
+        feeRate: document.getElementById('fee-rate').value,
+    }));
+}
+['capital','leverage','fee-rate'].forEach(id => {
+    document.getElementById(id).addEventListener('change', () => { saveSettings(); if (signalData) renderSignal(signalData); });
+});
+loadSettings();
+document.getElementById('btn-' + (INIT_STYLE === 'short_term' ? 'short' : 'medium')).classList.add('active');
+
+function getInterval(s) { return s === 'short_term' ? 60 : 14400; }
+
+function secondsToNextCandle() {
+    const now = new Date();
+    if (currentStyle === 'short_term') return 60 - now.getUTCSeconds();
+    const h = now.getUTCHours(), m = now.getUTCMinutes(), s = now.getUTCSeconds();
+    return ((Math.floor(h/4)+1)*4 - h) * 3600 - m*60 - s;
+}
+
+function formatCountdown(sec) {
+    if (currentStyle === 'short_term') return sec + 's';
+    return Math.floor(sec/3600) + 'h ' + Math.floor((sec%3600)/60) + 'm';
+}
+
+function switchStyle(s) {
+    if (s === currentStyle || isLoading) return;
+    currentStyle = s;
+    document.querySelectorAll('.style-btn').forEach(b => b.classList.remove('active'));
+    document.getElementById('btn-' + (s === 'short_term' ? 'short' : 'medium')).classList.add('active');
+    manualRefresh();
+}
+
+function updateCountdown() {
+    const label = document.getElementById('countdown-label');
+    if (isLoading) { label.textContent = ''; return; }
+    const sec = secondsToNextCandle();
+    label.textContent = '下次K线 ' + formatCountdown(sec);
+    if (sec <= 1) autoRefresh();
+}
+
+function autoRefresh() {
+    if (isLoading) return;
+    const controller = new AbortController();
+    setTimeout(() => controller.abort(), 15000);
+    fetch('/api/signal?style=' + currentStyle, { signal: controller.signal })
+        .then(r => r.json()).then(d => {
+            if (!d.error) {
+                signalData = d;
+                renderSignal(d);
+                const bar = document.querySelector('.signal-bar');
+                if (bar) {
+                    bar.classList.add('flash');
+                    setTimeout(() => bar.classList.remove('flash'), 600);
+                }
+                const label = document.getElementById('countdown-label');
+                label.textContent = '已更新';
+                label.style.color = '#2ecc71';
+                setTimeout(() => { label.style.color = ''; }, 800);
+            }
+        }).catch(() => {});
+}
+
+function manualRefresh() {
+    if (isLoading) return;
+    isLoading = true;
+    document.getElementById('countdown-label').textContent = '';
+    document.getElementById('main-content').innerHTML = '<div class="loading">刷新中...</div>';
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+    fetch('/api/signal?style=' + currentStyle, { signal: controller.signal })
+        .then(r => r.json()).then(d => {
+            clearTimeout(timeout);
+            isLoading = false;
+            if (d.error) {
+                document.getElementById('main-content').innerHTML =
+                    '<div class="error-box"><h3>' + d.error + '</h3><button class="btn btn-primary" onclick="manualRefresh()" style="margin-top:10px">重试</button></div>';
+                return;
+            }
+            signalData = d; renderSignal(d);
+        }).catch(e => {
+            clearTimeout(timeout);
+            isLoading = false;
+            document.getElementById('main-content').innerHTML =
+                '<div class="error-box"><h3>请求超时或失败</h3><p style="color:#525f7a;font-size:12px;margin-top:4px">' + e.message + '</p><button class="btn btn-primary" onclick="manualRefresh()" style="margin-top:10px">重试</button></div>';
+        });
+}
+
+function renderSignal(d) {
+    const bullish = d.direction === 'bullish';
+    const bearish = d.direction === 'bearish';
+    const emoji = bullish ? '📈' : (bearish ? '📉' : '⏸️');
+    const action = bullish ? '做多 LONG' : (bearish ? '做空 SHORT' : '观望 NEUTRAL');
+    const barClass = bullish ? 'bullish' : (bearish ? 'bearish' : 'neutral');
+    const confClass = d.confidence >= 70 ? 'high' : (d.confidence >= 40 ? 'mid' : 'low');
+
+    const entry = Number(d.entry_optimal);
+    const stop = Number(d.stop_loss);
+    const fee = parseFloat(document.getElementById('fee-rate').value) || 0.0005;
+
+    let rr = 0;
+    if (bullish) rr = ((d.take_profit_1 - entry) / ((entry - stop) || 1));
+    else if (bearish) rr = ((entry - d.take_profit_1) / ((stop - entry) || 1));
+
+    // 含手续费的净盈亏比
+    const cap2 = parseFloat(document.getElementById('capital').value) || 1000;
+    const lev2 = parseFloat(document.getElementById('leverage').value) || 1;
+    const pv2 = cap2 * lev2 * Math.min(d.confidence/100, 1);
+    const tf2 = pv2 * fee * 2;
+    let tp1$net = 0, stop$net = 0;
+    if (bullish) {
+        tp1$net = (d.take_profit_1 - entry) / entry * pv2 - tf2;
+        stop$net = Math.abs((stop - entry) / entry * pv2) + tf2;
+    } else if (bearish) {
+        tp1$net = (entry - d.take_profit_1) / entry * pv2 - tf2;
+        stop$net = Math.abs((entry - stop) / entry * pv2) + tf2;
+    }
+    const rrNet = stop$net > 0 ? (tp1$net / stop$net).toFixed(2) : rr.toFixed(2);
+
+    let tp1r = 0, tp2r = 0, tp3r = 0, stopR = 0;
+    if (bullish) {
+        tp1r = (d.take_profit_1/entry-1)*100; tp2r = (d.take_profit_2/entry-1)*100; tp3r = (d.take_profit_3/entry-1)*100;
+        stopR = (stop/entry-1)*100;
+    } else if (bearish) {
+        tp1r = (1-d.take_profit_1/entry)*100; tp2r = (1-d.take_profit_2/entry)*100; tp3r = (1-d.take_profit_3/entry)*100;
+        stopR = (1-stop/entry)*100;
+    }
+
+    const cap = parseFloat(document.getElementById('capital').value) || 1000;
+    const lev = parseFloat(document.getElementById('leverage').value) || 1;
+    const ratio = Math.min(d.confidence/100, 1);
+    const pv = cap * lev * ratio;
+    const marg = pv / lev;
+    const tf = pv * fee * 2;
+
+    const tp1$ = pv*tp1r/100, tp2$ = pv*tp2r/100, tp3$ = pv*tp3r/100, stop$ = pv*stopR/100;
+
+    const fmt = n => Number(n).toFixed(2);
+    const sgn = n => n > 0 ? '+' : '';
+
+    const confTag = `tag-conf ${confClass}`;
+
+    document.getElementById('main-content').innerHTML = `
+        <div class="signal-bar ${barClass}">
+            <div class="signal-left">
+                <span class="signal-emoji">${emoji}</span>
+                <span class="signal-action">${action}</span>
+            </div>
+            <div class="signal-tags">
+                <span class="tag tag-score">技术分 ${d.score}</span>
+                <span class="tag tag-adx">ADX ${d.adx}</span>
+                <span class="tag tag-price">$${fmt(d.price)}</span>
+                <span class="${confTag}">${d.confidence}%</span>
+            </div>
+        </div>
+
+        <div class="mid-row">
+            <div class="crd">
+                <div class="crd-title">入场区间</div>
+                <div class="crd-row"><span class="crd-label">最优价</span><span class="crd-value">$${fmt(entry)}</span></div>
+                <div class="crd-row"><span class="crd-label">范围</span><span class="crd-value">$${fmt(d.entry_zone_low)} ~ $${fmt(d.entry_zone_high)}</span></div>
+                <div class="crd-row"><span class="crd-label">盈亏比</span><span class="crd-value">1:${rrNet}</span></div>
+            </div>
+            <div class="crd">
+                <div class="crd-title">止损</div>
+                <div class="crd-row"><span class="crd-label">硬止损</span><span class="crd-value red">$${fmt(stop)}</span></div>
+                <div class="crd-row"><span class="crd-label">亏损幅度</span><span class="crd-value red">${sgn(stopR)}${stopR.toFixed(2)}%</span></div>
+                <div class="crd-row"><span class="crd-label">亏损金额</span><span class="crd-value red">${sgn(stop$)}$${fmt(stop$)}</span></div>
+            </div>
+        </div>
+
+        <div class="bottom-row">
+            <div class="crd">
+                <div class="crd-title">止盈目标</div>
+                <table class="tp-table">
+                    <tr><td class="lbl" style="font-size:10px">级别</td><td class="lbl" style="font-size:10px">触发价</td><td class="lbl" style="font-size:10px">分批</td><td class="lbl" style="font-size:10px">涨幅</td><td class="lbl" style="font-size:10px">盈亏</td></tr>
+                    <tr><td class="lbl">TP1</td><td class="val">$${fmt(d.take_profit_1)}</td><td class="lbl">30%</td><td class="green">${sgn(tp1r)}${tp1r.toFixed(2)}%</td><td class="green">${sgn(tp1$)}$${fmt(tp1$)}</td></tr>
+                    <tr><td class="lbl">TP2</td><td class="val">$${fmt(d.take_profit_2)}</td><td class="lbl">30%</td><td class="green">${sgn(tp2r)}${tp2r.toFixed(2)}%</td><td class="green">${sgn(tp2$)}$${fmt(tp2$)}</td></tr>
+                    <tr><td class="lbl">TP3</td><td class="val">$${fmt(d.take_profit_3)}</td><td class="lbl">40%</td><td class="green">${sgn(tp3r)}${tp3r.toFixed(2)}%</td><td class="green">${sgn(tp3$)}$${fmt(tp3$)}</td></tr>
+                </table>
+            </div>
+            <div class="crd">
+                <div class="crd-title">仓位 · 本金 $${cap} · ${lev}x</div>
+                <table class="tp-table">
+                    <tr><td class="lbl" style="font-size:10px">项目</td><td class="lbl" style="font-size:10px" colspan="3">数值</td></tr>
+                    <tr><td class="lbl">总价值</td><td class="val">$${fmt(pv)}</td><td class="lbl">保证金</td><td class="val">$${fmt(marg)}</td></tr>
+                    <tr><td class="lbl">开仓费+平仓费</td><td class="val">$${fmt(tf)}</td><td class="lbl">仓位比例</td><td class="val">${(ratio*100).toFixed(0)}%</td></tr>
+                    <tr><td class="lbl">TP3净盈(扣费后)</td><td class="green">${sgn(tp3$-tf)}$${fmt(tp3$-tf)}</td><td class="lbl">总ROI</td><td class="green">${sgn((tp3$-tf)/cap*100)}${((tp3$-tf)/cap*100).toFixed(1)}%</td></tr>
+                </table>
+            </div>
+        </div>
+
+        <div class="indicator-row">
+            ${['ema','macd','rsi','bollinger','volume','obv'].map(k => {
+                const v = Number(d.details[k]);
+                const cls = v > 0.3 ? 'pos' : (v < -0.3 ? 'neg' : 'neu');
+                const tips = {
+                    ema: 'EMA排列: +1=多头排列, -1=空头排列, 0=混乱',
+                    macd: 'MACD: +1=金叉看多, -1=死叉看空, 0=中性',
+                    rsi: 'RSI: >80超买看跌, <20超卖看涨, 中间中性',
+                    bollinger: '布林带: +0.7=触及下轨看涨, -0.7=触及上轨看跌',
+                    volume: '成交量: +0.8=放量确认趋势, -0.5=缩量动能不足',
+                    obv: 'OBV: +0.6=资金流入看涨, -0.6=资金流出看跌',
+                };
+                return `<div class="ind-item">
+                    <div class="ind-label">${k}<span class="tip">?</span>
+                        <span class="tip-text">${tips[k] || ''}</span>
+                    </div>
+                    <div class="ind-value ${cls}">${d.details[k]}</div>
+                </div>`;
+            }).join('')}
+        </div>
+
+        <!-- 微结构行已移除，仅用第一阶 -->
+
+        <div class="reason-bar">
+            <span class="reason-icon">💡</span>
+            <div class="reason-lines">
+                ${d.summary.split('\n').map(line => `<span class="reason-line">${line}</span>`).join('')}
+            </div>
+        </div>
+    `;
+}
+
+// ---- 历史记录 ----
+function toggleHistory() {
+    const panel = document.getElementById('history-panel');
+    const overlay = document.getElementById('history-overlay');
+    const isOpen = panel.classList.contains('open');
+    if (isOpen) {
+        panel.classList.remove('open'); overlay.classList.remove('show');
+    } else {
+        panel.classList.add('open'); overlay.classList.add('show'); loadHistory();
+    }
+}
+function loadHistory() {
+    const list = document.getElementById('history-list');
+    list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3)">加载中...</div>';
+    fetch('/api/history?limit=200').then(r=>r.json()).then(records => {
+        if (!records.length) { list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3)">暂无记录</div>'; return; }
+        document.getElementById('hp-count').textContent = records.length + '条';
+        // 表头
+        let html = '<div class="h-header"><span class="h-time">时间</span><span class="h-emoji"></span><span class="h-dir">方向</span><span class="h-score">分</span><span class="h-conf">信心</span><span class="h-tp">止盈</span><span class="h-sl">止损</span><span class="h-pnl">盈亏</span><span class="h-price">价格</span></div>';
+        html += records.map(r => {
+            const isB = r.direction === 'bullish', isBear = r.direction === 'bearish';
+            const e = isB ? '📈' : (isBear ? '📉' : '⏸️'), dt = isB ? '做多' : (isBear ? '做空' : '观望');
+            const c = isB ? 'h-bullish' : (isBear ? 'h-bearish' : 'h-neutral');
+            // 计算盈亏(止盈1 - 入场价)
+            const entry = Number(r.entry_optimal || r.price || 0);
+            const tp1 = Number(r.take_profit_1 || 0);
+            let pnl = 0, pnlStr = '--';
+            if (isB && entry > 0 && tp1 > 0) { pnl = tp1 - entry; pnlStr = (pnl > 0 ? '+' : '') + pnl.toFixed(1); }
+            else if (isBear && entry > 0 && tp1 > 0) { pnl = entry - tp1; pnlStr = (pnl > 0 ? '+' : '') + pnl.toFixed(1); }
+            const pnlCls = pnl > 0 ? 'h-pnl-pos' : (pnl < 0 ? 'h-pnl-neg' : '');
+            return '<div class="h-item ' + c + '"><span class="h-time">' + (r._time||'--') + '</span><span class="h-emoji">' + e + '</span><span class="h-dir">' + dt + '</span><span class="h-score">' + r.score + '</span><span class="h-conf">' + r.confidence + '%</span><span class="h-tp">' + (tp1 > 0 ? '$' + tp1.toFixed(0) : '--') + '</span><span class="h-sl">$' + Number(r.stop_loss||0).toFixed(0) + '</span><span class="h-pnl ' + pnlCls + '">' + pnlStr + '</span><span class="h-price">$' + Number(r.price||0).toFixed(0) + '</span></div>';
+        }).join('');
+        list.innerHTML = html;
+    }).catch(() => { list.innerHTML = '<div style="text-align:center;padding:20px;color:var(--red)">加载失败</div>'; });
+}
+
+function clearHistory() {
+    if (!confirm('确定清空所有历史信号记录？')) return;
+    fetch('/api/history', { method: 'DELETE' })
+        .then(r => r.json())
+        .then(() => {
+            document.getElementById('hp-count').textContent = '0条';
+            document.getElementById('history-list').innerHTML = '<div style="text-align:center;padding:20px;color:var(--text3)">已清空</div>';
+        })
+        .catch(() => {});
+}
+
+manualRefresh();
+setInterval(updateCountdown, 1000);
+</script>
+
+<div id="history-overlay" onclick="toggleHistory()"></div>
+<div id="history-panel">
+    <div class="hp-header"><span>📋 历史信号 <span class="hp-count" id="hp-count"></span></span><div><button class="hp-clear" onclick="clearHistory()" style="background:none;border:none;color:#e74c3c;font-size:11px;cursor:pointer;padding:2px 8px;border-radius:4px">清空</button><button class="hp-close" onclick="toggleHistory()" style="background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 4px">✕</button></div></div>
+    <div id="history-list"></div>
+</div>
+
+</body>
+</html>

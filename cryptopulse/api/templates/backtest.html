@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CryptoPulse — 量化回测</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden;background:#0b0e17;color:#e8edf5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif;font-size:12px}
+#topbar{position:fixed;top:0;left:0;right:0;z-index:100;height:38px;display:flex;justify-content:space-between;align-items:center;padding:0 14px;background:rgba(11,14,23,0.95);border-bottom:1px solid #1a2340}
+.tb-l{display:flex;align-items:center;gap:10px}
+.tb-logo{font-size:15px;font-weight:800;background:linear-gradient(135deg,#667eea,#764ba2);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.tb-link{color:#525f7a;text-decoration:none;font-size:11px}
+.tb-r{display:flex;align-items:center;gap:6px;font-size:11px;color:#525f7a}
+.tb-r input,.tb-r select{background:#131a2b;border:1px solid #1e2a45;border-radius:4px;color:#e8edf5;padding:2px 6px;font-size:10px;outline:none}
+.btn-r{padding:3px 10px;border:none;border-radius:4px;font-size:11px;font-weight:600;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;cursor:pointer}
+.btn-s{padding:2px 6px;border:none;border-radius:3px;font-size:9px;cursor:pointer;background:#1e2a45;color:#8892b0}
+#stats-panel{position:fixed;top:38px;left:0;right:0;z-index:50;background:#0f1420;border-bottom:1px solid #1a2340;padding:6px 14px;display:flex;flex-wrap:wrap;align-items:center;gap:4px 16px;font-size:11px}
+.st-group{display:flex;align-items:center;gap:6px}
+.st-label{color:#525f7a;font-size:10px}
+.st-val{font-weight:700;font-family:'Courier New',monospace;font-size:12px}
+.st-badge{display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:3px;font-weight:600;font-size:10px}
+.st-badge.green{background:rgba(46,204,113,0.15);color:#2ecc71}
+.st-badge.red{background:rgba(231,76,60,0.15);color:#e74c3c}
+.st-badge.gray{background:rgba(82,95,122,0.15);color:#8892b0}
+.st-divider{width:1px;height:20px;background:#1a2340}
+#chart-wrap{position:fixed;top:110px;left:0;right:0;bottom:280px;border-bottom:1px solid #1a2340}
+#bottom-panel{position:fixed;bottom:0;left:0;right:0;height:280px;display:flex;flex-direction:column;background:#0b0e17}
+#panel-tabs{display:flex;align-items:center;flex-shrink:0;height:30px;border-bottom:1px solid #1a2340;background:#0f1420}
+.panel-tab{padding:6px 14px;font-size:11px;color:#525f7a;cursor:pointer;border-bottom:2px solid transparent}
+.panel-tab.active{color:#e8edf5;border-bottom-color:#667eea}
+#panel-content{flex:1;overflow:hidden}
+#table-wrap{height:100%;overflow-y:auto;padding:0 6px}
+#table-wrap::-webkit-scrollbar{width:3px}
+#table-wrap::-webkit-scrollbar-track{background:#131a2b}
+#table-wrap::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:2px}
+table{width:100%;border-collapse:collapse;font-size:10px}
+th{position:sticky;top:0;background:#0f1420;padding:3px 6px;text-align:left;font-weight:600;color:#525f7a;font-size:9px;border-bottom:1px solid #1a2340}
+td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',monospace;font-size:10px}
+.td-time{color:#525f7a;font-size:9px}
+.td-price{text-align:right;color:#8892b0}
+.td-num{text-align:right}
+.td-up{color:#2ecc71;font-weight:600}
+.td-down{color:#e74c3c;font-weight:600}
+.td-ok{color:#2ecc71;font-weight:600}
+.td-fail{color:#e74c3c;font-weight:600}
+.td-pnl-pos{text-align:right;color:#2ecc71;font-weight:600}
+.td-pnl-neg{text-align:right;color:#e74c3c;font-weight:600}
+#dist-chart{height:100%;padding:10px 14px;overflow-y:auto;display:none}
+.dist-bar-wrap{display:flex;align-items:center;gap:6px;margin-bottom:3px}
+.dist-label{width:40px;font-size:9px;color:#525f7a;text-align:right;flex-shrink:0}
+.dist-bar-bg{flex:1;height:14px;background:#131a2b;border-radius:3px;overflow:hidden}
+.dist-bar-fill{height:100%;border-radius:3px;display:flex;align-items:center;padding-left:4px;font-size:8px;font-weight:600;color:#fff;min-width:20px}
+.dist-count{font-size:9px;color:#525f7a;width:30px;text-align:left}
+#load-err{display:none;position:fixed;inset:0;z-index:200;flex-direction:column;align-items:center;justify-content:center;gap:12px;background:#0b0e17;color:#525f7a;font-size:14px}
+#tip{position:fixed;display:none;z-index:150;pointer-events:none;background:#131a2b;border:1px solid #1e2a45;border-radius:6px;padding:6px 10px;font-size:11px;line-height:1.6;box-shadow:0 4px 12px rgba(0,0,0,0.5);min-width:140px}
+.tip-row{display:flex;justify-content:space-between;gap:10px}
+.tip-l{color:#525f7a}
+.tip-v{font-weight:600;font-family:'Courier New',monospace;color:#e8edf5}
+</style>
+</head>
+<body>
+<div id="load-err">
+    <div class="er-msg" id="err-detail">加载回测数据...</div>
+    <button onclick="location.reload()" style="padding:6px 20px;border:none;border-radius:6px;font-size:12px;font-weight:600;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;cursor:pointer">重试</button>
+</div>
+
+<div id="topbar">
+    <div class="tb-l">
+        <span class="tb-logo">CryptoPulse</span>
+        <a href="/" class="tb-link">← 信号</a>
+        <a href="/chart" class="tb-link">📊 K线</a>
+        <span style="color:#525f7a">📋 回测</span>
+    </div>
+    <div class="tb-r">
+        <span id="tb-info" style="font-size:10px;min-width:100px">加载中...</span>
+        <span style="display:flex;background:#131a2b;border-radius:4px;padding:1px;gap:1px">
+            <button class="st-btn" id="bt-short" onclick="setStyle('short_term')" style="padding:2px 10px;border:none;border-radius:3px;font-size:10px;cursor:pointer;background:#667eea;color:#fff;font-weight:600">1m</button>
+            <button class="st-btn" id="bt-medium" onclick="setStyle('medium_term')" style="padding:2px 10px;border:none;border-radius:3px;font-size:10px;cursor:pointer;background:transparent;color:#525f7a">4H</button>
+        </span>
+        <span>从</span>
+        <input type="datetime-local" id="sel-start" style="width:130px">
+        <span>到</span>
+        <input type="datetime-local" id="sel-end" style="width:130px">
+        <button class="btn-s" onclick="setRange(7)">7天</button>
+        <button class="btn-s" onclick="setRange(30)">30天</button>
+        <button class="btn-s" onclick="setRange(90)">90天</button>
+        <span>验证</span>
+        <select id="sel-lookahead" style="width:45px">
+            <option value="1">1</option>
+            <option value="3" selected>3</option>
+            <option value="5">5</option>
+            <option value="10">10</option>
+        </select>
+        <button class="btn-r" onclick="loadData()">回测</button>
+        <button class="btn-r" onclick="exportCSV()" style="background:#1e2a45;color:#8892b0">📥 导出</button>
+    </div>
+</div>
+
+<div id="stats-panel">
+    <div class="st-group">
+        <span class="st-label">信号</span>
+        <span class="st-val" id="st-total" style="color:#8892b0">--</span>
+    </div>
+    <div class="st-group">
+        <span class="st-badge green" id="st-bullish">📈 0/0</span>
+        <span class="st-badge red" id="st-bearish">📉 0/0</span>
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-group">
+        <span class="st-label">正确</span>
+        <span class="st-val" id="st-correct" style="color:#2ecc71">0</span>
+        <span class="st-label">错误</span>
+        <span class="st-val" id="st-wrong" style="color:#e74c3c">0</span>
+        <span class="st-label">准确率</span>
+        <span class="st-val" id="st-accuracy" style="font-size:16px">--%</span>
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-group">
+        <span class="st-label">总PnL</span>
+        <span class="st-val" id="st-pnl" style="font-size:14px">--%</span>
+        <span class="st-label">胜率</span>
+        <span class="st-val" id="st-winrate">--%</span>
+        <span class="st-label">盈亏比</span>
+        <span class="st-val" id="st-profitfactor">--</span>
+    </div>
+    <div class="st-divider"></div>
+    <div class="st-group">
+        <span class="st-label">平均盈</span>
+        <span class="st-val" id="st-avgwin" style="color:#2ecc71">--%</span>
+        <span class="st-label">平均亏</span>
+        <span class="st-val" id="st-avgloss" style="color:#e74c3c">--%</span>
+        <span class="st-label">连赢/连亏</span>
+        <span class="st-val" id="st-conwins" style="color:#2ecc71">--</span>
+        <span class="st-val" id="st-conlosses" style="color:#e74c3c">--</span>
+    </div>
+</div>
+
+<div id="chart-wrap"></div>
+<div id="bottom-panel">
+    <div id="panel-tabs">
+        <span class="panel-tab active" data-tab="list" onclick="switchTab('list')">📋 交易明细</span>
+        <span class="panel-tab" data-tab="dist" onclick="switchTab('dist')">📊 PnL分布</span>
+    </div>
+    <div id="panel-content">
+        <div id="table-wrap"></div>
+        <div id="dist-chart"></div>
+    </div>
+</div>
+<div id="tip"></div>
+
+<script>
+let chart, candleSeries, volumeSeries;
+let candles = [], trades = [], stats = null;
+let currentStyle = 'short_term';
+let loadReqId = 0;
+
+function initChart() {
+    const wrap = document.getElementById('chart-wrap');
+    chart = LightweightCharts.createChart(wrap, {
+        layout: {background:{type:'solid',color:'#0b0e17'},textColor:'#525f7a',fontSize:10,fontFamily:'Courier New, monospace'},
+        grid: {vertLines:{color:'#131a2b'},horzLines:{color:'#131a2b'}},
+        crosshair: {mode:LightweightCharts.CrosshairMode.Normal,vertLine:{color:'#2a3a55',width:1,style:LightweightCharts.LineStyle.Dashed,labelBackgroundColor:'#1e2a45'},horzLine:{color:'#2a3a55',width:1,style:LightweightCharts.LineStyle.Dashed,labelBackgroundColor:'#1e2a45'}},
+        timeScale: {borderColor:'#1a2340',timeVisible:true,secondsVisible:false,tickMarkFormatter:t=>{const d=new Date(t*1000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}},
+        rightPriceScale: {borderColor:'#1a2340'},
+        handleScroll: {vertTouchDrag:false},
+    });
+    candleSeries = chart.addCandlestickSeries({upColor:'#2ecc71',downColor:'#e74c3c',borderDownColor:'#e74c3c',borderUpColor:'#2ecc71',wickDownColor:'#e74c3c',wickUpColor:'#2ecc71'});
+    volumeSeries = chart.addHistogramSeries({color:'#1a2340',priceFormat:{type:'volume'},priceScaleId:''});
+    chart.priceScale('').applyOptions({scaleMargins:{top:0.8,bottom:0}});
+    new ResizeObserver(()=>{if(chart)chart.resize(wrap.clientWidth,wrap.clientHeight)}).observe(wrap);
+    chart.subscribeCrosshairMove(param=>{
+        const tip=document.getElementById('tip');
+        if(!param.time||!param.point){tip.style.display='none';return}
+        const c=candles.find(x=>Math.floor(x.t/1000)===param.time);
+        const t=trades.find(x=>Math.floor(x.timestamp/1000)===param.time);
+        if(!c){tip.style.display='none';return}
+        const ts=param.time*1000;
+        let html='<div class="tip-row"><span class="tip-l">时间</span><span class="tip-v">'+new Date(ts).toLocaleTimeString()+'</span></div>'
+            +'<div class="tip-row"><span class="tip-l">O/C</span><span class="tip-v">'+c.o.toFixed(1)+' / '+c.c.toFixed(1)+'</span></div>'
+            +'<div class="tip-row"><span class="tip-l">H/L</span><span class="tip-v">'+c.h.toFixed(1)+' / '+c.l.toFixed(1)+'</span></div>';
+        if(c.s){const d=c.s.direction==='bullish'?'📈 多':(c.s.direction==='bearish'?'📉 空':'⏸️');html+='<div class="tip-row"><span class="tip-l">信号</span><span class="tip-v" style="color:'+(c.s.direction==='bullish'?'#2ecc71':'#e74c3c')+'">'+d+'</span></div>'
+            +'<div class="tip-row"><span class="tip-l">评分</span><span class="tip-v">'+c.s.score+' / '+c.s.confidence+'%</span></div>'}
+        if(t){html+='<div class="tip-row"><span class="tip-l">验证</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>'
+            +'<div class="tip-row"><span class="tip-l">入场→出场</span><span class="tip-v">'+t.entry_price+'→'+t.exit_price+'</span></div>'
+            +'<div class="tip-row"><span class="tip-l">PnL</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'%</span></div>'}
+        tip.innerHTML=html;
+        const x=param.point.x,y=param.point.y,wr=document.getElementById('chart-wrap').getBoundingClientRect();
+        tip.style.left=(x+15>wr.right?x-160:x+15)+'px';tip.style.top=(y-10<wr.top?y+20:y-10)+'px';tip.style.display='block'
+    });
+    initDates();loadData();
+}
+
+function initDates(){
+    const now=new Date();
+    const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    document.getElementById('sel-end').value=fmt(now);
+    document.getElementById('sel-start').value=fmt(new Date(now.getTime()-24*3600*1000));
+}
+
+function setRange(days){
+    const now=new Date();
+    const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+    document.getElementById('sel-end').value=fmt(now);
+    document.getElementById('sel-start').value=fmt(new Date(now.getTime()-days*24*3600*1000));
+    loadData();
+}
+
+function setStyle(style){
+    currentStyle=style;
+    document.querySelectorAll('.st-btn').forEach(b=>{b.style.background='transparent';b.style.color='#525f7a'});
+    const btn=document.getElementById(style==='short_term'?'bt-short':'bt-medium');
+    btn.style.background='#667eea';btn.style.color='#fff';
+    loadData();
+}
+
+function exportCSV(){
+    const start=document.getElementById('sel-start').value;
+    const end=document.getElementById('sel-end').value;
+    const lookahead=document.getElementById('sel-lookahead').value;
+    let url='/api/backtest/export?style='+currentStyle+'&lookahead='+lookahead;
+    if(start)url+='&start='+start;
+    if(end)url+='&end='+end;
+    window.open(url,'_blank');
+}
+
+function loadData(){
+    const lookahead=document.getElementById('sel-lookahead').value;
+    const start=document.getElementById('sel-start').value;
+    const end=document.getElementById('sel-end').value;
+    const reqId=++loadReqId;
+    const info=document.getElementById('tb-info');
+    info.textContent='加载中...';
+    document.getElementById('table-wrap').innerHTML='';
+    document.getElementById('load-err').style.display='none';
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead;
+    if(start)url+='&start='+start;
+    if(end)url+='&end='+end;
+    fetch(url).then(r=>r.json()).then(d=>{
+        if(reqId!==loadReqId)return;
+        if(d.error){document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=d.error;return}
+        candles=d.candles||[];trades=d.trades||[];stats=d.stats||{};
+        renderChart();renderStats();renderTable();renderDistChart();
+        info.textContent=d.total_candles+'根K线 · '+stats.total_trades+'笔交易';
+        if(d.date_range)info.textContent+=' · '+d.date_range.start+'~'+d.date_range.end;
+    }).catch(e=>{if(reqId!==loadReqId)return;document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=e.message});
+}
+
+function renderChart(){
+    if(!candles||!candles.length){candleSeries.setData([]);volumeSeries.setData([]);candleSeries.setMarkers([]);return}
+    const cdlData=candles.map(c=>({time:Math.floor(c.t/1000),open:c.o,high:c.h,low:c.l,close:c.c}));
+    candleSeries.setData(cdlData);
+    volumeSeries.setData(candles.map(c=>({time:Math.floor(c.t/1000),value:c.v,color:c.c>=c.o?'rgba(46,204,113,0.25)':'rgba(231,76,60,0.25)'})));
+    const markers=[],tradeMap={};
+    trades.forEach(t=>tradeMap[t.timestamp]=t);
+    candles.forEach(c=>{
+        if(!c.s||c.s.direction==='neutral')return;
+        const t=Math.floor(c.t/1000);
+        const tr=tradeMap[c.t];
+        if(tr)markers.push({time:t,position:tr.correct?'belowBar':'aboveBar',color:tr.correct?'#2ecc71':'#e74c3c',shape:tr.correct?'arrowUp':'arrowDown',text:tr.correct?'✓':'✗',size:1.2});
+        else markers.push({time:t,position:'inBar',color:'#525f7a',shape:'circle',text:'',size:0.6});
+    });
+    candleSeries.setMarkers(markers);
+    chart.timeScale().fitContent();
+}
+
+function renderStats(){
+    if(!stats||!stats.total_trades){document.getElementById('st-total').textContent='0';document.getElementById('st-accuracy').textContent='--%';return}
+    document.getElementById('st-total').textContent=stats.total_trades;
+    document.getElementById('st-bullish').innerHTML='📈 '+stats.correct_bullish+'/'+stats.bullish;
+    document.getElementById('st-bearish').innerHTML='📉 '+stats.correct_bearish+'/'+stats.bearish;
+    document.getElementById('st-correct').textContent=stats.correct;
+    document.getElementById('st-wrong').textContent=stats.wrong;
+    const acc=document.getElementById('st-accuracy');acc.textContent=stats.accuracy+'%';acc.style.color=stats.accuracy>=60?'#2ecc71':(stats.accuracy>=40?'#f1c40f':'#e74c3c');
+    const pnl=document.getElementById('st-pnl');pnl.textContent=(stats.total_pnl_pct>=0?'+':'')+stats.total_pnl_pct+'%';pnl.style.color=stats.total_pnl_pct>=0?'#2ecc71':'#e74c3c';
+    document.getElementById('st-winrate').textContent=stats.win_rate+'%';
+    document.getElementById('st-profitfactor').textContent=stats.profit_factor;
+    document.getElementById('st-avgwin').textContent=(stats.avg_win>=0?'+':'')+stats.avg_win+'%';
+    document.getElementById('st-avgloss').textContent=stats.avg_loss+'%';
+    document.getElementById('st-conwins').textContent=stats.max_consecutive_wins;
+    document.getElementById('st-conlosses').textContent=stats.max_consecutive_losses;
+}
+
+function renderTable(){
+    if(!trades.length){document.getElementById('table-wrap').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
+    const sorted=[...trades].reverse();
+    let html='<table><thead><tr><th>#</th><th>时间</th><th>方向</th><th>评分</th><th>入场价</th><th>出场价</th><th>PnL%</th><th>结果</th></tr></thead><tbody>';
+    sorted.forEach((t,i)=>{
+        const dirCls=t.direction==='bullish'?'td-up':'td-down',dirTxt=t.direction==='bullish'?'📈 多':'📉 空';
+        const pnlCls=t.pnl_pct>=0?'td-pnl-pos':'td-pnl-neg',pnlTxt=(t.pnl_pct>=0?'+':'')+t.pnl_pct+'%';
+        const resCls=t.correct?'td-ok':'td-fail',resTxt=t.correct?'✅':'❌';
+        html+='<tr><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+t.score+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td></tr>';
+    });
+    document.getElementById('table-wrap').innerHTML=html+'</tbody></table>';
+}
+
+function renderDistChart(){
+    if(!trades.length){document.getElementById('dist-chart').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
+    const pnls=trades.map(t=>t.pnl_pct),minPnl=Math.floor(Math.min(...pnls)),maxPnl=Math.ceil(Math.max(...pnls));
+    const binCount=Math.max(10,Math.min(30,Math.ceil((maxPnl-minPnl)/0.5))),binWidth=(maxPnl-minPnl)/binCount||0.1;
+    const bins=[];for(let i=0;i<binCount;i++){const lo=minPnl+i*binWidth,hi=lo+binWidth;bins.push({lo,hi,count:pnls.filter(p=>p>=lo&&(i===binCount-1?p<=hi:p<hi)).length,isWin:lo>=0})}
+    const maxCount=Math.max(...bins.map(b=>b.count),1);
+    let html='<div style="padding:4px 0;font-size:10px;color:#525f7a;margin-bottom:4px">PnL 分布（共 '+trades.length+' 笔）</div>';
+    const wins=pnls.filter(p=>p>0).length,losses=pnls.filter(p=>p<=0).length;
+    html+='<div style="display:flex;gap:14px;margin-bottom:6px;font-size:10px"><span style="color:#2ecc71">✅ 盈利 '+wins+' 笔</span><span style="color:#e74c3c">❌ 亏损 '+losses+' 笔</span></div>';
+    bins.forEach(b=>{const pct=b.count/maxCount*100;html+='<div class="dist-bar-wrap"><span class="dist-label">'+(b.lo>=0?'+':'')+b.lo.toFixed(1)+'%</span><div class="dist-bar-bg"><div class="dist-bar-fill" style="width:'+Math.max(pct,5)+'%;background:'+(b.isWin?'#2ecc71':'#e74c3c')+'">'+(b.count>0?b.count:'')+'</div></div><span class="dist-count">'+b.count+'</span></div>'});
+    let cumPnl=0;const cumData=trades.map(t=>{cumPnl+=t.pnl_pct;return{cum:Math.round(cumPnl*100)/100}});
+    const maxCum=Math.max(...cumData.map(d=>d.cum),1),minCum=Math.min(...cumData.map(d=>d.cum),-1),cumRange=maxCum-minCum||1;
+    html+='<div style="margin-top:10px;font-size:10px;color:#525f7a">PnL 累积曲线</div><div style="display:flex;align-items:flex-end;height:40px;gap:1px;padding:2px 0">';
+    cumData.forEach(d=>{const h=((d.cum-minCum)/cumRange)*36;html+='<div style="width:3px;height:'+Math.max(h,1)+'px;background:'+(d.cum>=0?'#2ecc71':'#e74c3c')+';border-radius:1px;flex-shrink:0"></div>'});
+    html+='</div><div style="display:flex;justify-content:space-between;font-size:8px;color:#525f7a"><span>起始</span><span>最终: '+(cumData.length?(cumData[cumData.length-1].cum>=0?'+':'')+cumData[cumData.length-1].cum+'%':'0%')+'</span></div>';
+    document.getElementById('dist-chart').innerHTML=html;
+}
+
+function switchTab(tab){
+    document.querySelectorAll('.panel-tab').forEach(el=>el.classList.remove('active'));
+    document.querySelector('.panel-tab[data-tab="'+tab+'"]').classList.add('active');
+    document.getElementById('table-wrap').style.display=tab==='list'?'block':'none';
+    document.getElementById('dist-chart').style.display=tab==='dist'?'block':'none';
+}
+
+initChart();
+</script>
+</body>
+</html>
