@@ -1,57 +1,23 @@
-# Prosperity Public License 3.0.0
+# CryptoPulse 非商业使用许可证
 
-Contributor: CryptoPulse
+版权所有 (c) 2024 CryptoPulse
 
-Source Code: https://github.com/2279881513/Crypto-Pulse
+本许可证基于 Prosperity Public License 3.0 修改，移除了商业试用条款。
 
-## Purpose
+## 许可条款
 
-This license allows you to use and share this software for noncommercial purposes for free and to try this software for commercial purposes for thirty days.
+1. **学习目的**：本软件仅供个人学习、研究和教育目的使用。
 
-## Agreement
+2. **禁止商业用途**：未经版权持有人明确书面许可，不得将本软件或其任何部分用于商业目的，包括但不限于销售、转售、租赁、分发或提供基于本软件的收费服务。
 
-In order to receive this license, you have to agree to its rules. Those rules are both obligations under that agreement and conditions to your license. Don't do anything with this software that triggers a rule you can't or won't follow.
+3. **禁止实盘交易**：不得将本软件直接或间接用于任何真实金融市场交易、投资决策或资产管理。
 
-## Notices
+4. **禁止转售**：不得以任何形式转售、再许可或分发本软件及其修改版本。
 
-Make sure everyone who gets a copy of any part of this software from you knows the source of the software and its license notice above.
+5. **免责声明**：本软件按"原样"提供，不提供任何明示或暗示的保证。使用本软件所产生的一切风险由使用者自行承担。
 
-## Commercial Trial
+6. **修改与衍生**：允许对本软件进行修改和衍生，但修改后的版本也必须遵守本许可证条款，并保留原始版权声明。
 
-Limit your use of this software for commercial purposes to a thirty-day trial period. If you use this software for commercial purposes, you must register your use, pay your bill, and license your use under a separate agreement, or stop using it. If you don't follow this rule, you may not use the software for commercial purposes.
+7. **终止**：违反本许可证任何条款将自动终止您的使用权利，且必须销毁所有副本。
 
-## Contributions
-
-For the purpose of determining the nature of your use, the给你的 Contributions to this software fall under the same noncommercial terms as the software itself.
-
-## Personal Uses
-
-Personal use for research, experiment, and testing for the benefit of public knowledge, personal study, private entertainment, hobby projects, or amateur pursuits are not commercial purposes, regardless of whether you are paid for this use by your employer.
-
-## No Live Trading
-
-You may not use this software, in whole or in part, for any real-world financial trading, investment decision-making, asset management, or any related activity. This software is provided for educational and research purposes only.
-
-## No License Fee
-
-You may not sell, resell, license, sublicense, or distribute this software or any derivative works for a fee or other compensation.
-
-## Freedom
-
-If you don't trust the contributor or don't believe that the contributor has complied with the law, you have no permission to use the software.
-
-## Consequences
-
-If you violate any rule, and the contributor or someone authorized by the contributor tells you to stop the violating behavior, you must stop it immediately. If you don't, you lose your license and must destroy all copies of the software you have.
-
-## Patent Claims
-
-The contributor promises not to sue you for patent claims based on your using the software as allowed by this license, as long as you don't sue the contributor for patent claims based on the contributor's contributions to the software.
-
-## Reliability
-
-The contributor doesn't promise that the software is bug-free or that using it won't cause problems. The contributor provides the software as-is, without any warranty of any kind, including any warranty that the software will be safe to use or do what you want.
-
-## No Liability
-
-The contributor is not liable for any damages related to the software or this license, including any direct, indirect, special, incidental, or consequential damages, even if the contributor has been advised of the possibility of those damages.
+8. **无担保**：贡献者不保证软件无缺陷，不承担任何损害赔偿责任。
