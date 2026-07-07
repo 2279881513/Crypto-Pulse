@@ -70,6 +70,7 @@ class TechnicalSignalEngine:
         close = df["close"].values
         high = df["high"].values
         low = df["low"].values
+        openp = df["open"].values
         vol = df["volume"].values
         price = close[-1]
 
@@ -99,14 +100,15 @@ class TechnicalSignalEngine:
         # ---------------------------------------------------------------
         signals = {}
         weights = {
-            "ema": 0.25,
-            "macd": 0.10,
-            "rsi": 0.12,
+            "ema": 0.20,
+            "macd": 0.12,
+            "rsi": 0.10,
             "bollinger": 0.10,
             "volume": 0.08,
-            "obv": 0.10,
+            "obv": 0.08,
             "adx_filter": 0.10,
-            "momentum": 0.15,
+            "momentum": 0.12,
+            "micro": 0.10,
         }
 
         # --- EMA 排列评分 ---
@@ -145,25 +147,25 @@ class TechnicalSignalEngine:
         else:
             signals["macd"] = 0.0
 
-        # --- RSI 评分 (修复: RSI 30-45 是偏空低位, 应看多反弹)
+        # --- RSI 评分 ---
         if not np.isnan(rsi_val[-1]):
             r = rsi_val[-1]
-            if r >= self.rsi_ob:
-                signals["rsi"] = -0.8  # 超买 → 看跌
+            if r >= 80:
+                signals["rsi"] = -1.0
             elif r >= 70:
-                signals["rsi"] = -0.4
+                signals["rsi"] = -0.5
             elif r >= 60:
-                signals["rsi"] = -0.1
-            elif r >= 50:
-                signals["rsi"] = 0.0   # 中性偏多
-            elif r >= 40:
-                signals["rsi"] = 0.1   # 中性偏空, 但倾向反弹
-            elif r >= 30:
-                signals["rsi"] = 0.3   # 偏弱低位, 看反弹
+                signals["rsi"] = -0.2
+            elif r >= 45:
+                signals["rsi"] = 0.2
+            elif r >= 35:
+                signals["rsi"] = 0.0
+            elif r >= 25:
+                signals["rsi"] = 0.3
             elif r >= 20:
-                signals["rsi"] = 0.6   # 接近超卖
+                signals["rsi"] = 0.6
             else:
-                signals["rsi"] = 0.8   # 超卖 → 看涨
+                signals["rsi"] = 1.0
         else:
             signals["rsi"] = 0.0
 
@@ -204,35 +206,53 @@ class TechnicalSignalEngine:
         else:
             signals["obv"] = 0.0
 
+        # --- K线微观结构评分 ---
+        cr = high[-1] - low[-1]
+        if cr > 0:
+            bd = abs(close[-1] - openp[-1]); br = bd / cr; cp = (close[-1] - low[-1]) / cr
+            uw = (high[-1] - max(close[-1], openp[-1])) / cr
+            lw = (min(close[-1], openp[-1]) - low[-1]) / cr
+            if br > 0.7 and cp > 0.7:
+                signals["micro"] = 0.8
+            elif br > 0.7 and cp < 0.3:
+                signals["micro"] = -0.8
+            elif uw > 0.5 and br < 0.3:
+                signals["micro"] = -0.5
+            elif lw > 0.5 and br < 0.3:
+                signals["micro"] = 0.5
+            elif br < 0.2 and vol_ratio > 1.5:
+                signals["micro"] = 0.4 if cp > 0.6 else (-0.4 if cp < 0.4 else 0.0)
+            else:
+                signals["micro"] = 0.0
+        else:
+            signals["micro"] = 0.0
+
         # --- 动量评分 (5根K线价格变化率) ---
         if len(close) >= 6:
             mom_pct = (close[-1] - close[-6]) / close[-6] * 100
-            if mom_pct > 0.8:
+            if mom_pct > 0.08:
                 signals["momentum"] = 1.0
-            elif mom_pct > 0.4:
-                signals["momentum"] = 0.7
-            elif mom_pct > 0.15:
-                signals["momentum"] = 0.3
-            elif mom_pct > -0.15:
-                signals["momentum"] = 0.0
-            elif mom_pct > -0.4:
-                signals["momentum"] = -0.3
-            elif mom_pct > -0.8:
-                signals["momentum"] = -0.7
-            else:
+            elif mom_pct > 0.03:
+                signals["momentum"] = 0.5
+            elif mom_pct < -0.08:
                 signals["momentum"] = -1.0
+            elif mom_pct < -0.03:
+                signals["momentum"] = -0.5
+            else:
+                signals["momentum"] = 0.0
         else:
             signals["momentum"] = 0.0
 
-        # --- ADX 趋势强度过滤 ---
+        # --- ADX 趋势强度 ---
         adx_latest = adx_val[-1] if not np.isnan(adx_val[-1]) else 0
-        if adx_latest < 25:
-            # 弱趋势: 不加乘, 保留原信号
+        if adx_latest >= 35:
+            signals["adx_filter"] = 0.8
+        elif adx_latest >= 25:
+            signals["adx_filter"] = 0.3
+        elif adx_latest >= 20:
             signals["adx_filter"] = 0.0
-        elif adx_latest >= 35:
-            signals["adx_filter"] = 0.3  # 强趋势加乘
         else:
-            signals["adx_filter"] = 0.0
+            signals["adx_filter"] = -0.3
 
         # ---------------------------------------------------------------
         # 3. 综合评分
@@ -241,8 +261,8 @@ class TechnicalSignalEngine:
         total_score = total * 100  # 映射到 -100 ~ +100
         total_score = max(-100, min(100, total_score))
 
-        # 方向判定 (提高阈值到25)
-        threshold = 25
+        # 方向判定
+        threshold = 40
         if total_score > threshold:
             direction = Direction.BULLISH
         elif total_score < -threshold:
@@ -250,23 +270,25 @@ class TechnicalSignalEngine:
         else:
             direction = Direction.NEUTRAL
 
-        # ---- ADX 弱趋势过滤: ADX<25 时只保留强信号 ----
-        if adx_latest < 25 and abs(total_score) < 35:
+        # ---- ADX 弱趋势过滤: 无趋势+中等信号→放弃 ----
+        if adx_latest < 25 and abs(total_score) < 50:
             direction = Direction.NEUTRAL
 
         # ---- EMA 方向做软过滤(非硬过滤) ----
         ema_bullish = not any(np.isnan(x) for x in (ema_f[-1], ema_m[-1], ema_s[-1])) and ema_f[-1] > ema_m[-1] > ema_s[-1]
         ema_bearish = not any(np.isnan(x) for x in (ema_f[-1], ema_m[-1], ema_s[-1])) and ema_f[-1] < ema_m[-1] < ema_s[-1]
         if ema_bullish and direction == Direction.BEARISH:
-            if abs(total_score) < 30:
+            if abs(total_score) < 40:
                 direction = Direction.NEUTRAL  # 上升趋势不做空(除非信号极强)
         elif ema_bearish and direction == Direction.BULLISH:
-            if abs(total_score) < 30:
+            if abs(total_score) < 40:
                 direction = Direction.NEUTRAL  # 下降趋势不做多(除非信号极强)
 
-        # 信心度（基于评分绝对值, 含 ADX 加成）
+        # 信心度
         adx_bonus = 1.15 if adx_latest >= 35 else (1.05 if adx_latest >= 25 else 0.9)
         confidence = min(100, max(10, int(abs(total_score) * 0.9 * adx_bonus)))
+        if direction != Direction.NEUTRAL and confidence < 35:
+            direction = Direction.NEUTRAL
 
         # ---------------------------------------------------------------
         # 4. 入场/止盈/止损点位（结合支撑阻力和 ATR）

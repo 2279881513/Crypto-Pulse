@@ -30,8 +30,18 @@ html,body{height:100%;overflow:hidden;background:#0b0e17;color:#e8edf5;font-fami
 #panel-tabs{display:flex;align-items:center;flex-shrink:0;height:30px;border-bottom:1px solid #1a2340;background:#0f1420}
 .panel-tab{padding:6px 14px;font-size:11px;color:#525f7a;cursor:pointer;border-bottom:2px solid transparent}
 .panel-tab.active{color:#e8edf5;border-bottom-color:#667eea}
+/* 加载进度条 */
+#progress-overlay{display:none;position:fixed;inset:0;z-index:300;background:rgba(11,14,23,0.85);flex-direction:column;align-items:center;justify-content:center;gap:16px}
+#progress-overlay.show{display:flex}
+.progress-bar{width:280px;height:4px;background:#1a2340;border-radius:4px;overflow:hidden}
+.progress-bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:4px;transition:width .3s ease}
+.progress-text{color:#8892b0;font-size:12px}
+/* 隐藏数字输入框箭头 */
+input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield}
 #panel-content{flex:1;overflow:hidden}
 #table-wrap{height:100%;overflow-y:auto;padding:0 6px}
+#table-wrap table th,#table-wrap table td{white-space:nowrap;padding:3px 5px}
 #table-wrap::-webkit-scrollbar{width:3px}
 #table-wrap::-webkit-scrollbar-track{background:#131a2b}
 #table-wrap::-webkit-scrollbar-thumb{background:#1e2a45;border-radius:2px}
@@ -58,6 +68,11 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
 .tip-row{display:flex;justify-content:space-between;gap:10px}
 .tip-l{color:#525f7a}
 .tip-v{font-weight:600;font-family:'Courier New',monospace;color:#e8edf5}
+/* 右键菜单 */
+#ctx-menu{display:none;position:fixed;z-index:500;background:#131a2b;border:1px solid #1e2a45;border-radius:6px;padding:4px 0;min-width:140px;box-shadow:0 4px 16px rgba(0,0,0,0.6);font-size:11px}
+#ctx-menu .ctx-item{padding:6px 14px;cursor:pointer;display:flex;align-items:center;gap:8px;color:#e8edf5}
+#ctx-menu .ctx-item:hover{background:#1e2a45}
+#ctx-menu .ctx-divider{height:1px;background:#1a2340;margin:3px 0}
 </style>
 </head>
 <body>
@@ -74,25 +89,34 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
         <span style="color:#525f7a">📋 回测</span>
     </div>
     <div class="tb-r">
-        <span id="tb-info" style="font-size:10px;min-width:100px">加载中...</span>
+        <span id="tb-info" style="font-size:10px;min-width:100px">输入时间后点击「回测」</span>
         <span style="display:flex;background:#131a2b;border-radius:4px;padding:1px;gap:1px">
             <button class="st-btn" id="bt-short" onclick="setStyle('short_term')" style="padding:2px 10px;border:none;border-radius:3px;font-size:10px;cursor:pointer;background:#667eea;color:#fff;font-weight:600">1m</button>
             <button class="st-btn" id="bt-medium" onclick="setStyle('medium_term')" style="padding:2px 10px;border:none;border-radius:3px;font-size:10px;cursor:pointer;background:transparent;color:#525f7a">4H</button>
         </span>
         <span>从</span>
+        <input type="text" id="date-range" placeholder="例如: 2026/05/01 00:00 - 2026/05/31 00:00" style="width:240px;font-size:10px">
+        <span style="color:#525f7a;font-size:9px">|</span>
+        <span>从</span>
         <input type="datetime-local" id="sel-start" style="width:130px">
         <span>到</span>
         <input type="datetime-local" id="sel-end" style="width:130px">
+        <button class="btn-s" id="btn-latest" onclick="toggleLatest()" style="background:#1e2a45;color:#8892b0">📡 到最新</button>
         <button class="btn-s" onclick="setRange(7)">7天</button>
         <button class="btn-s" onclick="setRange(30)">30天</button>
         <button class="btn-s" onclick="setRange(90)">90天</button>
+        <button class="btn-s" id="btn-realtime" onclick="toggleRealtime()" style="background:#1e2a45;color:#8892b0">🔄 实时</button>
         <span>验证</span>
         <select id="sel-lookahead" style="width:45px">
             <option value="1">1</option>
-            <option value="3" selected>3</option>
             <option value="5">5</option>
-            <option value="10">10</option>
+            <option value="10" selected>10</option>
         </select>
+        <span style="color:#525f7a;font-size:9px">损</span>
+        <input id="sel-sl" type="text" value="0.15" style="width:32px;background:#131a2b;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:monospace;outline:none" title="止损%">
+        <span style="color:#525f7a;font-size:9px">盈</span>
+        <input id="sel-tp" type="text" value="0.25" style="width:32px;background:#131a2b;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:monospace;outline:none" title="止盈%">
+        <button id="btn-histpred" class="btn-r" onclick="toggleHistPred()" style="background:transparent;border:1px solid #525f7a;font-size:10px;color:#525f7a">📊 预测</button>
         <button class="btn-r" onclick="loadData()">回测</button>
         <button class="btn-r" onclick="exportCSV()" style="background:#1e2a45;color:#8892b0">📥 导出</button>
     </div>
@@ -135,61 +159,188 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
         <span class="st-val" id="st-conwins" style="color:#2ecc71">--</span>
         <span class="st-val" id="st-conlosses" style="color:#e74c3c">--</span>
     </div>
+    <div class="st-divider"></div>
+    <div class="st-group" style="gap:3px">
+        <span style="font-size:9px;color:#525f7a">本</span>
+        <input id="pos-capital" type="text" inputmode="numeric" value="1000" style="width:50px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:'Courier New',monospace;outline:none">
+        <span style="font-size:9px;color:#525f7a">杠</span>
+        <input id="pos-leverage" type="text" inputmode="numeric" value="1" style="width:34px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:'Courier New',monospace;outline:none">
+        <span style="font-size:9px;color:#525f7a">费</span>
+        <select id="pos-fee" style="width:46px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 2px;font-size:9px;outline:none">
+            <option value="0.0005">0.05%</option><option value="0.0002" selected>0.02%</option><option value="0.001">0.10%</option>
+        </select>
+        <label style="font-size:9px;color:#525f7a;cursor:pointer;display:flex;align-items:center;gap:2px" title="过滤掉利润不够扣手续费的低质量信号">
+            <input type="checkbox" id="chk-fee-filter" checked style="width:10px;height:10px;cursor:pointer">保本
+        </label>
+        <span id="st-pnl-net" style="color:#525f7a;font-size:10px"></span>
+    </div>
 </div>
 
 <div id="chart-wrap"></div>
+<div id="hl-label" style="display:none;position:fixed;top:115px;left:10px;z-index:40;background:#131a2b;border:1px solid #667eea;border-radius:4px;padding:2px 8px;font-size:11px;color:#e8edf5;pointer-events:none"></div>
+
+<!-- 右键菜单 -->
+<div id="ctx-menu" oncontextmenu="event.preventDefault();this.style.display='none'">
+    <div class="ctx-item" onclick="ctxAction('zoomIn')">🔍 放大</div>
+    <div class="ctx-item" onclick="ctxAction('zoomOut')">🔍 缩小</div>
+    <div class="ctx-item" onclick="ctxAction('reset')">🔄 重置视图</div>
+    <div class="ctx-divider"></div>
+    <div class="ctx-item" onclick="ctxAction('togglePred')">📊 切换预测K线</div>
+    <div class="ctx-item" id="ctx-clear-hl" style="display:none" onclick="ctxAction('clearHighlight')">❌ 清除高亮</div>
+    <div class="ctx-divider"></div>
+    <div class="ctx-item" onclick="ctxAction('exportCsv')">📥 导出CSV</div>
+</div>
+
+<!-- 加载进度条 -->
+<div id="progress-overlay">
+    <div style="font-size:28px">⏳</div>
+    <div class="progress-bar"><div class="progress-bar-fill"></div></div>
+    <div class="progress-text" id="progress-text">正在处理数据，请稍候...</div>
+</div>
+
 <div id="bottom-panel">
     <div id="panel-tabs">
         <span class="panel-tab active" data-tab="list" onclick="switchTab('list')">📋 交易明细</span>
         <span class="panel-tab" data-tab="dist" onclick="switchTab('dist')">📊 PnL分布</span>
+        <span class="panel-tab" data-tab="pos" onclick="switchTab('pos')">💰 盈亏</span>
+        <span class="panel-tab" data-tab="score" onclick="switchTab('score')">📊 评分</span>
     </div>
     <div id="panel-content">
         <div id="table-wrap"></div>
         <div id="dist-chart"></div>
+        <div id="pos-panel" style="display:none;height:100%;overflow-y:auto;padding:12px 14px"></div>
+        <div id="score-panel" style="display:none;height:100%;overflow-y:auto;padding:12px 14px"></div>
     </div>
 </div>
 <div id="tip"></div>
 
+<!-- 点击详情浮层 -->
+<div id="dl-overlay" style="display:none;position:fixed;z-index:200;background:rgba(11,14,23,0.97);border:1px solid #1e2a45;border-radius:8px;padding:14px;min-width:260px;max-width:360px;box-shadow:0 8px 32px rgba(0,0,0,0.6);font-size:12px">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-weight:700;font-size:13px" id="dl-time"></span>
+        <span style="cursor:pointer;color:#525f7a;font-size:16px" onclick="document.getElementById('dl-overlay').style.display='none'">✕</span>
+    </div>
+    <div style="font-weight:600;font-size:14px;margin-bottom:6px" id="dl-dir"></div>
+    <div style="font-size:10px;color:#8892b0;margin-bottom:4px;display:none" id="dl-reason"></div>
+    <div style="display:flex;flex-direction:column;gap:3px;margin-bottom:6px" id="dl-kdata"></div>
+    <div style="border-top:1px solid #1a2340;padding-top:6px;margin-top:4px;display:none" id="dl-trade"></div>
+</div>
+
 <script>
-let chart, candleSeries, volumeSeries;
+let chart, candleSeries, volumeSeries, predSeries, histPredSeries;
 let candles = [], trades = [], stats = null;
 let currentStyle = 'short_term';
 let loadReqId = 0;
+let showHistPred = false;
+let lastPrediction = null;
+let latestMode = false;
+let latestTimer = null;
+let realtimeMode = false;
+let realtimeStart = 0;
+let realtimeTimer = null;
+let highlightFilter = null; // {type:'reason'|'score', value:'止损'|'止盈'|'时间到'|30|40|...}
 
+// 加载保存的仓位设置
+(function(){
+    try{
+        const s=JSON.parse(localStorage.getItem('cryptopulse_settings')||'{}');
+        if(s.capital)document.getElementById('pos-capital').value=s.capital;
+        if(s.leverage)document.getElementById('pos-leverage').value=s.leverage;
+        if(s.feeRate)document.getElementById('pos-fee').value=s.feeRate;
+    }catch(e){}
+})();
+
+var plineRefs=[];function clearPlines(){plineRefs.forEach(p=>{try{candleSeries.removePriceLine(p)}catch(e){}});plineRefs=[];}
+var _fPct=function(a,b){try{var r=((Number(a)/Number(b))-1)*100;return isNaN(r)?'':(r>=0?'+':'')+r.toFixed(2)+'%'}catch(e){return''}};
 function initChart() {
     const wrap = document.getElementById('chart-wrap');
     chart = LightweightCharts.createChart(wrap, {
         layout: {background:{type:'solid',color:'#0b0e17'},textColor:'#525f7a',fontSize:10,fontFamily:'Courier New, monospace'},
         grid: {vertLines:{color:'#131a2b'},horzLines:{color:'#131a2b'}},
         crosshair: {mode:LightweightCharts.CrosshairMode.Normal,vertLine:{color:'#2a3a55',width:1,style:LightweightCharts.LineStyle.Dashed,labelBackgroundColor:'#1e2a45'},horzLine:{color:'#2a3a55',width:1,style:LightweightCharts.LineStyle.Dashed,labelBackgroundColor:'#1e2a45'}},
-        timeScale: {borderColor:'#1a2340',timeVisible:true,secondsVisible:false,tickMarkFormatter:t=>{const d=new Date(t*1000);return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')}},
+        timeScale: {borderColor:'#1a2340',timeVisible:true,secondsVisible:false,tickMarkFormatter:t=>{const d=new Date(t*1000);return String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0')}},
         rightPriceScale: {borderColor:'#1a2340'},
         handleScroll: {vertTouchDrag:false},
     });
     candleSeries = chart.addCandlestickSeries({upColor:'#2ecc71',downColor:'#e74c3c',borderDownColor:'#e74c3c',borderUpColor:'#2ecc71',wickDownColor:'#e74c3c',wickUpColor:'#2ecc71'});
     volumeSeries = chart.addHistogramSeries({color:'#1a2340',priceFormat:{type:'volume'},priceScaleId:''});
+    predSeries = chart.addCandlestickSeries({
+        upColor:'rgba(102,126,234,0.4)',downColor:'rgba(118,75,162,0.4)',
+        borderUpColor:'#667eea',borderDownColor:'#764ba2',
+        wickUpColor:'#667eea',wickDownColor:'#764ba2',
+    });
+    histPredSeries = chart.addCandlestickSeries({
+        upColor:'rgba(46,204,113,0.25)',downColor:'rgba(231,76,60,0.25)',
+        borderUpColor:'rgba(46,204,113,0.5)',borderDownColor:'rgba(231,76,60,0.5)',
+        wickUpColor:'rgba(46,204,113,0.25)',wickDownColor:'rgba(231,76,60,0.25)',
+        priceLineVisible:false,
+    });
     chart.priceScale('').applyOptions({scaleMargins:{top:0.8,bottom:0}});
     new ResizeObserver(()=>{if(chart)chart.resize(wrap.clientWidth,wrap.clientHeight)}).observe(wrap);
     chart.subscribeCrosshairMove(param=>{
         const tip=document.getElementById('tip');
-        if(!param.time||!param.point){tip.style.display='none';return}
+        if(!param.time||!param.point){tip.style.display='none';clearPlines();return}
         const c=candles.find(x=>Math.floor(x.t/1000)===param.time);
-        const t=trades.find(x=>Math.floor(x.timestamp/1000)===param.time);
-        if(!c){tip.style.display='none';return}
+        if(!c){tip.style.display='none';clearPlines();return}
+        const t=trades.find(x=>x.timestamp===c.t);
+        clearPlines();
+        if(t){
+            if(t.sl_price)plineRefs.push(candleSeries.createPriceLine({price:t.sl_price,color:'#e74c3c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'止损'}));
+            if(t.tp_price)plineRefs.push(candleSeries.createPriceLine({price:t.tp_price,color:'#2ecc71',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'止盈'}));
+            if(t.entry_price)plineRefs.push(candleSeries.createPriceLine({price:t.entry_price,color:'#f1c40f',lineWidth:1,lineStyle:0,axisLabelVisible:true,title:'入场'}));
+        }
         const ts=param.time*1000;
-        let html='<div class="tip-row"><span class="tip-l">时间</span><span class="tip-v">'+new Date(ts).toLocaleTimeString()+'</span></div>'
+        let html='<div class="tip-row"><span class="tip-l">时间</span><span class="tip-v">'+new Date(ts).toISOString().slice(0,16).replace('T',' ')+'</span></div>'
             +'<div class="tip-row"><span class="tip-l">O/C</span><span class="tip-v">'+c.o.toFixed(1)+' / '+c.c.toFixed(1)+'</span></div>'
             +'<div class="tip-row"><span class="tip-l">H/L</span><span class="tip-v">'+c.h.toFixed(1)+' / '+c.l.toFixed(1)+'</span></div>';
         if(c.s){const d=c.s.direction==='bullish'?'📈 多':(c.s.direction==='bearish'?'📉 空':'⏸️');html+='<div class="tip-row"><span class="tip-l">信号</span><span class="tip-v" style="color:'+(c.s.direction==='bullish'?'#2ecc71':'#e74c3c')+'">'+d+'</span></div>'
-            +'<div class="tip-row"><span class="tip-l">评分</span><span class="tip-v">'+c.s.score+' / '+c.s.confidence+'%</span></div>'}
-        if(t){html+='<div class="tip-row"><span class="tip-l">验证</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>'
-            +'<div class="tip-row"><span class="tip-l">入场→出场</span><span class="tip-v">'+t.entry_price+'→'+t.exit_price+'</span></div>'
-            +'<div class="tip-row"><span class="tip-l">PnL</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'%</span></div>'}
+            +'<div class="tip-row"><span class="tip-l">评分</span><span class="tip-v">'+Math.abs(c.s.score)+' / '+c.s.confidence+'%</span></div>'
+            +(c.s.reason?'<div class="tip-row"><span class="tip-l">原因</span><span class="tip-v" style="color:#8892b0;font-size:10px">'+c.s.reason+'</span></div>':'')}
+        if(t){var dp=t.direction==='bullish';var pnl$=t.pnl_pct*Number(document.getElementById('pos-capital').value||1000)*Number(document.getElementById('pos-leverage').value||1)/100;
+        var a=[];a.push('<div class="tip-row"><span class="tip-l">方向</span><span class="tip-v" style="color:'+(dp?'#2ecc71':'#e74c3c')+'">'+(dp?'📈 多':'📉 空')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">入场</span><span class="tip-v">'+t.entry_price+'</span></div>');if(t.sl_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#e74c3c">止损</span><span class="tip-v" style="color:#e74c3c">'+t.sl_price+' ('+_fPct(t.sl_price,t.entry_price)+')</span></div>')}if(t.tp_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#2ecc71">止盈</span><span class="tip-v" style="color:#2ecc71">'+t.tp_price+' ('+_fPct(t.tp_price,t.entry_price)+')</span></div>')}a.push('<div class="tip-row"><span class="tip-l">出场</span><span class="tip-v">'+t.exit_price+'</span></div>');var e=t.exit_reason||'';var ic=e==='止盈'?'🎯':e==='止损'?'🛑':e==='时间到'?'⏱️':'';a.push('<div class="tip-row"><span class="tip-l">离场</span><span class="tip-v" style="font-size:10px;color:#8892b0">'+ic+e+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">结果</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">盈亏</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'% $'+(pnl$>=0?'+':'')+pnl$.toFixed(2)+'</span></div>');html+=a.join('')}
         tip.innerHTML=html;
         const x=param.point.x,y=param.point.y,wr=document.getElementById('chart-wrap').getBoundingClientRect();
         tip.style.left=(x+15>wr.right?x-160:x+15)+'px';tip.style.top=(y-10<wr.top?y+20:y-10)+'px';tip.style.display='block'
     });
-    initDates();loadData();
+    initDates();
+
+    // 右键菜单
+    document.getElementById('chart-wrap').addEventListener('contextmenu',e=>{
+        e.preventDefault();
+        document.getElementById('ctx-clear-hl').style.display=highlightFilter?'block':'none';
+        const menu=document.getElementById('ctx-menu');
+        menu.style.display='block';
+        menu.style.left=Math.min(e.clientX,window.innerWidth-160)+'px';
+        menu.style.top=Math.min(e.clientY,window.innerHeight-300)+'px';
+    });
+    document.addEventListener('click',()=>{document.getElementById('ctx-menu').style.display='none'});
+}
+
+function ctxAction(action){
+    document.getElementById('ctx-menu').style.display='none';
+    switch(action){
+        case 'zoomIn':chart.timeScale().zoomOut();break;
+        case 'zoomOut':chart.timeScale().zoomIn();break;
+        case 'reset':chart.timeScale().fitContent();break;
+        case 'togglePred':toggleHistPred();break;
+        case 'clearHighlight':clearHighlight();break;
+        case 'exportCsv':exportCSV();break;
+    }
+}
+
+function parseDateRange(input){
+    const val=input.value.trim();
+    if(!val||!val.includes('-'))return null;
+    const parts=val.split('-').map(s=>s.trim());
+    if(parts.length!==2)return null;
+    const fmt=s=>{
+        // 支持 2026/05/01 00:00 和 2026-05-01T00:00 格式
+        let str=s.replace(/\//g,'-');
+        if(str.includes(' ')&&!str.includes('T'))str=str.replace(' ','T');
+        if(!str.includes('T')&&str.length<=10)str+='T00:00';
+        return str;
+    };
+    return {start:fmt(parts[0]),end:fmt(parts[1])};
 }
 
 function initDates(){
@@ -200,11 +351,78 @@ function initDates(){
 }
 
 function setRange(days){
+    if(latestMode)toggleLatest();
     const now=new Date();
     const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
     document.getElementById('sel-end').value=fmt(now);
     document.getElementById('sel-start').value=fmt(new Date(now.getTime()-days*24*3600*1000));
+    document.getElementById('date-range').value='';
     loadData();
+}
+
+function toggleLatest(){
+    latestMode=!latestMode;
+    const btn=document.getElementById('btn-latest');
+    const endInput=document.getElementById('sel-end');
+    if(latestMode){
+        btn.style.background='#667eea';btn.style.color='#fff';
+        endInput.disabled=true;endInput.style.opacity='0.4';
+        // 设置结束时间为明天，让API用当前时间
+        const d=new Date();d.setDate(d.getDate()+1);
+        endInput.value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T00:00';
+        loadData();
+        // 每60秒自动刷新
+        if(latestTimer)clearInterval(latestTimer);
+        latestTimer=setInterval(()=>{if(latestMode)silentReload();},30000);
+    }else{
+        btn.style.background='#1e2a45';btn.style.color='#8892b0';
+        endInput.disabled=false;endInput.style.opacity='1';
+        if(latestTimer){clearInterval(latestTimer);latestTimer=null;}
+    }
+}
+
+function toggleRealtime(){
+    realtimeMode=!realtimeMode;
+    const btn=document.getElementById('btn-realtime');
+    if(realtimeMode){
+        btn.style.background='#e74c3c';btn.style.color='#fff';
+        realtimeStart=Date.now();
+        // 加载最近7天K线让指标充分预热
+        const now=new Date();
+        const fmt=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+        const sevenDaysAgo=new Date(now.getTime()-7*24*3600*1000);
+        document.getElementById('sel-end').value=fmt(now);
+        document.getElementById('sel-start').value=fmt(sevenDaysAgo);
+        document.getElementById('date-range').value='';
+        loadData();
+        if(realtimeTimer)clearInterval(realtimeTimer);
+        realtimeTimer=setInterval(()=>{if(realtimeMode)silentReload();},30000);
+    }else{
+        btn.style.background='#1e2a45';btn.style.color='#8892b0';
+        if(realtimeTimer){clearInterval(realtimeTimer);realtimeTimer=null;}
+    }
+}
+
+function silentReload(){
+    const lookahead=document.getElementById('sel-lookahead').value;
+    const start=document.getElementById('sel-start').value;
+    const end=document.getElementById('sel-end').value;
+    const dateRange=parseDateRange(document.getElementById('date-range'));
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+document.getElementById('sel-sl').value+'&tp='+document.getElementById('sel-tp').value+'&_t='+Date.now();
+    if(realtimeMode)url+='&trade_start='+realtimeStart;
+    if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);}
+    else if(start){url+='&start='+start;}
+    fetch(url).then(r=>r.json()).then(d=>{
+        if(d.error)return;
+        candles=d.candles||[];trades=d.trades||[];stats=d.stats||{};
+        lastPrediction=d.prediction||null;
+        renderChart(true);renderStats();renderTable();renderDistChart();
+        updateNetPnl();
+        const info=document.getElementById('tb-info');
+        info.textContent=(realtimeMode?'🔴 ':'📡 ')+d.total_candles+'根K线 · '+stats.total_trades+'笔交易';
+        if(d.date_range)info.textContent+=' · '+d.date_range.start+'~'+d.date_range.end;
+        if(lastPrediction)info.textContent+=' · 📡 最新预测:'+(lastPrediction.direction==='bullish'?'📈':'📉')+lastPrediction.confidence+'%';
+    }).catch(()=>{});
 }
 
 function setStyle(style){
@@ -219,9 +437,12 @@ function exportCSV(){
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
     const lookahead=document.getElementById('sel-lookahead').value;
-    let url='/api/backtest/export?style='+currentStyle+'&lookahead='+lookahead;
-    if(start)url+='&start='+start;
-    if(end)url+='&end='+end;
+    const sl=document.getElementById('sel-sl').value;
+    const tp=document.getElementById('sel-tp').value;
+    const dateRange=parseDateRange(document.getElementById('date-range'));
+    let url='/api/backtest/export?style='+currentStyle+'&lookahead='+lookahead+'&sl='+sl+'&tp='+tp;
+    if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
+    else{if(start)url+='&start='+start;if(end)url+='&end='+end;}
     window.open(url,'_blank');
 }
 
@@ -229,75 +450,412 @@ function loadData(){
     const lookahead=document.getElementById('sel-lookahead').value;
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
+    const dateRange=parseDateRange(document.getElementById('date-range'));
     const reqId=++loadReqId;
     const info=document.getElementById('tb-info');
-    info.textContent='加载中...';
-    document.getElementById('table-wrap').innerHTML='';
+    const startLabel=dateRange?dateRange.start:(start||'最早');
+    const endLabel=dateRange?dateRange.end:(latestMode?'最新':(end||'现在'));
+    info.textContent='⏳ 正在回测 '+startLabel+' ~ '+endLabel+' ...';
+    document.getElementById('table-wrap').innerHTML='<div style="padding:30px;text-align:center;color:#525f7a;font-size:12px">⏳ 正在计算信号，请稍候...</div>';
     document.getElementById('load-err').style.display='none';
-    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead;
-    if(start)url+='&start='+start;
-    if(end)url+='&end='+end;
+    // 估算K线数量和预计时间
+    let totalEst=0;
+    if(dateRange){
+        const s=new Date(dateRange.start),e=new Date(dateRange.end);
+        const days=(e-s)/(86400000);
+        totalEst=Math.max(100,Math.round(days*1440));
+    }else if(start&&end){
+        const s=new Date(start),e=new Date(end);
+        const days=(e-s)/(86400000);
+        totalEst=Math.max(100,Math.round(days*1440));
+    }else if(start&&latestMode){
+        const s=new Date(start),e=new Date();
+        const days=(e-s)/(86400000);
+        totalEst=Math.max(100,Math.round(days*1440));
+    }else{totalEst=10000;}
+    // 每500根K线约1秒，加1秒保底
+    const estSec=Math.max(2,Math.round(totalEst/500)+1);
+    const startTime=Date.now();
+    const barFill=document.querySelector('#progress-overlay .progress-bar-fill');
+    const barText=document.getElementById('progress-text');
+    document.getElementById('progress-overlay').classList.add('show');
+    barFill.style.animation='none';barFill.style.width='0%';
+    barText.textContent='估算 '+totalEst+' 根K线，约需 '+estSec+' 秒...';
+    // 模拟进度更新
+    const progTimer=setInterval(()=>{
+        const elapsed=(Date.now()-startTime)/1000;
+        const pct=Math.min(95,Math.round(elapsed/estSec*100));
+        barFill.style.width=pct+'%';
+        const remain=Math.max(0,estSec-Math.round(elapsed));
+        barText.textContent='正在处理 '+totalEst+' 根K线 · '+pct+'% · 预计剩余 '+remain+' 秒';
+    },200);
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+document.getElementById('sel-sl').value+'&tp='+document.getElementById('sel-tp').value+'&_t='+Date.now();
+    if(realtimeMode)url+='&trade_start='+realtimeStart;
+    if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
+    else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
     fetch(url).then(r=>r.json()).then(d=>{
+        clearInterval(progTimer);
+        barFill.style.width='100%';
+        barText.textContent='处理完成 ✅';
+        setTimeout(()=>{document.getElementById('progress-overlay').classList.remove('show');},300);
         if(reqId!==loadReqId)return;
-        if(d.error){document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=d.error;return}
+        if(d.error){document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=d.error;info.textContent='❌ '+d.error;return}
         candles=d.candles||[];trades=d.trades||[];stats=d.stats||{};
+        lastPrediction=d.prediction||null;
         renderChart();renderStats();renderTable();renderDistChart();
-        info.textContent=d.total_candles+'根K线 · '+stats.total_trades+'笔交易';
+        updateNetPnl();
+        updatePosPanel();
+        const icon=realtimeMode?'🔴 ':(latestMode?'📡 ':'✅ ');
+        info.textContent=icon+d.total_candles+'根K线 · '+stats.total_trades+'笔交易';
         if(d.date_range)info.textContent+=' · '+d.date_range.start+'~'+d.date_range.end;
-    }).catch(e=>{if(reqId!==loadReqId)return;document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=e.message});
+        if(lastPrediction){
+            info.textContent+=' · 预测:'+(lastPrediction.direction==='bullish'?'📈':'📉')+lastPrediction.confidence+'%';
+            document.getElementById('btn-histpred').style.borderColor='#667eea';
+            document.getElementById('btn-histpred').style.color='#667eea';
+        }
+    }).catch(e=>{
+        clearInterval(progTimer);
+        document.getElementById('progress-overlay').classList.remove('show');
+        if(reqId!==loadReqId)return;
+        info.textContent='❌ '+e.message;
+        document.getElementById('load-err').style.display='flex';
+        document.getElementById('err-detail').textContent=e.message;
+    });
 }
 
-function renderChart(){
+// ===== 费用过滤：过滤利润不够扣手续费的低质量信号 =====
+function getFilteredTrades(src){
+    if(!document.getElementById('chk-fee-filter').checked)return src;
+    const fee=parseFloat(document.getElementById('pos-fee').value)||0.0005;
+    const minPnl=fee*2*100;
+    return src.filter(t=>Math.abs(t.pnl_pct)>=minPnl);
+}
+
+// checkbox 变化时刷新
+['pos-fee','chk-fee-filter'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.addEventListener('change',()=>{
+        if(trades&&trades.length){renderStats();renderTable();renderDistChart();renderScoreChart();updatePosPanel();updateNetPnl();}
+    });
+});
+
+function updateNetPnl(){
+    try{
+    const ft=getFilteredTrades(trades);
+    const el=document.getElementById('st-pnl-net');
+    if(!ft||!ft.length){el.innerHTML='';return}
+    const cap=parseFloat(document.getElementById('pos-capital').value)||1000;
+    const lev=parseFloat(document.getElementById('pos-leverage').value)||1;
+    const fee=parseFloat(document.getElementById('pos-fee').value)||0.0005;
+    const grossPnl=ft.reduce(function(s,t){return s+t.pnl_pct},0);
+    const totalFee=ft.length*cap*lev*fee*2;
+    const net=grossPnl*cap*lev/100-totalFee;
+    const roi=net/cap*100;
+    if(net>=0)el.innerHTML='<span style="color:#2ecc71">净利 +$'+net.toFixed(0)+' ROI +'+roi.toFixed(1)+'%</span>';
+    else el.innerHTML='<span style="color:#e74c3c">净利 -$'+Math.abs(net).toFixed(0)+' ROI '+roi.toFixed(1)+'%</span>';
+    }catch(e){}
+}
+function fmtPct(a,b){try{var r=((Number(a)/Number(b))-1)*100;return isNaN(r)?'':(r>=0?'+':'')+r.toFixed(2)+'%'}catch(e){return''}}
+
+// ===== 仓位管理 =====
+['pos-capital','pos-leverage','pos-fee'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.addEventListener('change',()=>{
+        localStorage.setItem('cryptopulse_settings',JSON.stringify({
+            capital:parseFloat(document.getElementById('pos-capital').value)||1000,
+            leverage:parseFloat(document.getElementById('pos-leverage').value)||1,
+            feeRate:document.getElementById('pos-fee').value,
+        }));
+        // 更新净利显示
+        if(typeof stats!=='undefined'&&stats&&stats.total_trades){
+            const cap=parseFloat(document.getElementById('pos-capital').value)||1000;
+            const lev=parseFloat(document.getElementById('pos-leverage').value)||1;
+            const fee=parseFloat(document.getElementById('pos-fee').value)||0.0005;
+            const gross=stats.total_pnl_pct||0;
+            const totalFee=stats.total_trades*cap*lev*fee*2;
+            const net=gross*cap*lev/100-totalFee;
+            const roi=net/cap*100;
+            const el=document.getElementById('st-pnl-net');
+            if(net>=0)el.innerHTML='<span style="color:#2ecc71">净利 +$'+net.toFixed(0)+' ROI +'+roi.toFixed(1)+'%</span>';
+            else el.innerHTML='<span style="color:#e74c3c">净利 -$'+Math.abs(net).toFixed(0)+' ROI '+roi.toFixed(1)+'%</span>';
+        }
+    });
+});
+
+function updatePosPanel(){
+    const ft=getFilteredTrades(trades);
+    if(!ft||!ft.length){document.getElementById('pos-panel').innerHTML='<div style="text-align:center;color:#525f7a;padding:30px">暂无交易数据</div>';return}
+    const cap=parseFloat(document.getElementById('pos-capital').value)||1000;
+    const lev=parseFloat(document.getElementById('pos-leverage').value)||1;
+    const fee=parseFloat(document.getElementById('pos-fee').value)||0.0005;
+    const wins=ft.filter(t=>t.pnl_pct>0).length;
+    const losses=ft.filter(t=>t.pnl_pct<=0).length;
+    const grossPnl=ft.reduce((s,t)=>s+t.pnl_pct,0);
+    const totalFee=ft.length*cap*lev*fee*2;
+    const netPnl=grossPnl*cap*lev/100-totalFee;
+    const roi=netPnl/cap*100;
+    const avgWin=ft.filter(t=>t.pnl_pct>0).reduce((s,t)=>s+t.pnl_pct,0)/Math.max(1,wins);
+    const avgLoss=ft.filter(t=>t.pnl_pct<=0).reduce((s,t)=>s+t.pnl_pct,0)/Math.max(1,losses);
+    const sgn=n=>n>0?'+':'';
+    const c=n=>n>=0?'#2ecc71':'#e74c3c';
+    document.getElementById('pos-panel').innerHTML='<div style="max-width:100%">'
+        +'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:6px">'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">本金</div><div style="font-size:14px;font-weight:700;font-family:monospace">$'+cap.toFixed(0)+'</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">杠杆</div><div style="font-size:14px;font-weight:700;font-family:monospace">'+lev+'x</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">费率</div><div style="font-size:14px;font-weight:700;font-family:monospace">'+(fee*100).toFixed(2)+'%</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">笔数</div><div style="font-size:14px;font-weight:700;font-family:monospace">'+trades.length+'</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">胜/负</div><div style="font-size:14px;font-weight:700;font-family:monospace">'+wins+'/'+losses+'</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">胜率</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:#2ecc71">'+(wins/trades.length*100).toFixed(1)+'%</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">总毛利</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:'+c(grossPnl)+'">'+sgn(grossPnl)+grossPnl.toFixed(2)+'%</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">手续费</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:#e74c3c">$'+totalFee.toFixed(2)+'</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">净利润</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:'+c(netPnl)+'">'+sgn(netPnl)+'$'+Math.abs(netPnl).toFixed(2)+'</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">ROI</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:'+c(roi)+'">'+sgn(roi)+roi.toFixed(2)+'%</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">平均盈</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:#2ecc71">'+sgn(avgWin)+avgWin.toFixed(3)+'%</div></div>'
+        +'<div style="background:#131a2b;border-radius:4px;padding:8px;text-align:center"><div style="color:#525f7a;font-size:9px">平均亏</div><div style="font-size:14px;font-weight:700;font-family:monospace;color:#e74c3c">'+avgLoss.toFixed(3)+'%</div></div>'
+        +'</div>'
+        +'</div>';
+}
+
+function toggleHistPred(){
+    showHistPred=!showHistPred;
+    const btn=document.getElementById('btn-histpred');
+    btn.style.background=showHistPred?'#667eea':'transparent';
+    btn.style.color=showHistPred?'#fff':'#525f7a';
+    btn.style.borderColor=showHistPred?'#667eea':'#525f7a';
+    if(showHistPred)renderPrediction();
+    else{predSeries.setData([]);histPredSeries.setData([]);}
+}
+
+function renderPrediction(){
+    if(!candles||candles.length<2){predSeries.setData([]);histPredSeries.setData([]);return}
+    // 历史预测K线：所有有信号的K线的预测
+    const histData=[];
+    const signals=candles.filter(c=>c.s&&c.s.direction&&c.s.direction!=='neutral');
+    for(let j=0;j<signals.length;j++){
+        const s=signals[j];
+        const atr=(s.h-s.l)||1;
+        const open=s.c;
+        const isUp=s.s.direction==='bullish';
+        const predTime=Math.floor(s.t/1000)+60;
+        let close,high,low;
+        if(isUp){close=open+atr*0.4;high=Math.max(open,close)+atr*0.2;low=Math.min(open,close)-atr*0.2;}
+        else{close=open-atr*0.4;high=Math.max(open,close)+atr*0.2;low=Math.min(open,close)-atr*0.2;}
+        histData.push({time:predTime,open,high,low,close});
+    }
+    histPredSeries.setData(histData.length?histData:[]);
+    // 下一条预测K线
+    if(lastPrediction){
+        const last=candles[candles.length-1];
+        const nextTime=last.t+60000;
+        const base=last.c;
+        const atr=Math.abs(last.h-last.l);
+        const range=Math.max(atr*0.5,base*0.002);
+        const isBull=lastPrediction.direction==='bullish';
+        const predOpen=base+(isBull?range*0.1:-range*0.1);
+        const predClose=base+(isBull?range*0.6:-range*0.6);
+        const predHigh=base+(isBull?range*0.8:-range*0.2);
+        const predLow=base+(isBull?range*0.05:-range*0.8);
+        predSeries.setData([{time:nextTime/1000,open:predOpen,high:predHigh,low:predLow,close:predClose}]);
+        chart.timeScale().scrollToPosition(chart.timeScale().scrollPosition()+30,false);
+    }else{predSeries.setData([]);}
+}
+
+function renderChart(keepZoom){
     if(!candles||!candles.length){candleSeries.setData([]);volumeSeries.setData([]);candleSeries.setMarkers([]);return}
+    // 保存缩放位置
+    let savedPos=null,savedRight=null;
+    if(keepZoom){
+        try{savedPos=chart.timeScale().scrollPosition();savedRight=chart.timeScale().getVisibleLogicalRange();}catch(e){}
+    }
     const cdlData=candles.map(c=>({time:Math.floor(c.t/1000),open:c.o,high:c.h,low:c.l,close:c.c}));
     candleSeries.setData(cdlData);
     volumeSeries.setData(candles.map(c=>({time:Math.floor(c.t/1000),value:c.v,color:c.c>=c.o?'rgba(46,204,113,0.25)':'rgba(231,76,60,0.25)'})));
-    const markers=[],tradeMap={};
+    const markers=[],tradeMap={},signalColors={};
     trades.forEach(t=>tradeMap[t.timestamp]=t);
     candles.forEach(c=>{
         if(!c.s||c.s.direction==='neutral')return;
         const t=Math.floor(c.t/1000);
         const tr=tradeMap[c.t];
-        if(tr)markers.push({time:t,position:tr.correct?'belowBar':'aboveBar',color:tr.correct?'#2ecc71':'#e74c3c',shape:tr.correct?'arrowUp':'arrowDown',text:tr.correct?'✓':'✗',size:1.2});
-        else markers.push({time:t,position:'inBar',color:'#525f7a',shape:'circle',text:'',size:0.6});
+        if(tr){
+            // 高亮过滤：不匹配的直接跳过
+            if(highlightFilter){
+                let matched=true;
+                if(highlightFilter.type==='reason'){
+                    matched=(tr.exit_reason||'时间到')===highlightFilter.value;
+                }else if(highlightFilter.type==='score'){
+                    const bucket=Math.floor(Math.abs(tr.score)/10)*10;
+                    matched=bucket===highlightFilter.value;
+                }
+                if(!matched)return; // 不匹配的完全不显示
+            }
+            const isUp=tr.direction==='bullish';
+            const isGreen=tr.correct;
+            markers.push({
+                time:t,
+                position:isUp?'belowBar':'aboveBar',
+                color:isGreen?'#2ecc71':'#e74c3c',
+                shape:isUp?'arrowUp':'arrowDown',
+                text:isGreen?'✅':'❌',
+                size:highlightFilter?2.0:1.5,
+            });
+        }else{
+            // 只有信号没有交易（可能是预测后来被过滤了）
+            markers.push({
+                time:t,
+                position:'inBar',
+                color:'#525f7a',
+                shape:'diamond',
+                text:'',
+                size:0.6,
+            });
+        }
     });
     candleSeries.setMarkers(markers);
-    chart.timeScale().fitContent();
+    if(showHistPred)renderPrediction();
+    // 高亮状态指示
+    const hlLabel=document.getElementById('hl-label');
+    if(highlightFilter){
+        const val=highlightFilter.value;
+        const txt=highlightFilter.type==='reason'?val:(val+'~'+(val+10)+'分');
+        hlLabel.textContent='🔍 '+txt;
+        hlLabel.style.display='block';
+    }else{
+        hlLabel.style.display='none';
+    }
+    if(keepZoom&&savedPos!==null){
+        try{chart.timeScale().setVisibleLogicalRange(savedRight);}catch(e){chart.timeScale().fitContent();}
+    }else{
+        chart.timeScale().scrollToRealTime();
+    }
+}
+
+function jumpToTrade(ts){
+    const timeSec=Math.floor(ts/1000);
+    let idx=-1;
+    for(let i=0;i<candles.length;i++){
+        if(Math.floor(candles[i].t/1000)===timeSec){idx=i;break}
+    }
+    if(idx<0){for(let i=0;i<candles.length;i++){
+        if(Math.abs(Math.floor(candles[i].t/1000)-timeSec)<60){idx=i;break}
+    }}
+    if(idx>=0){
+        const visibleCount=80;
+        const start=Math.max(0,idx-visibleCount/2);
+        const end=Math.min(candles.length-1,start+visibleCount);
+        const fromTime=Math.floor(candles[start].t/1000);
+        const toTime=Math.floor(candles[end].t/1000);
+        chart.timeScale().setVisibleRange({from:fromTime,to:toTime});
+        // 闪烁：先保存当前标记，显示闪烁标记，1.5秒后恢复
+        const flash=[{time:timeSec,position:'inBar',color:'#f1c40f',shape:'circle',text:'⭐',size:2.5}];
+        candleSeries.setMarkers(flash);
+        setTimeout(()=>{
+            // 恢复原始标记（不触发重新渲染，避免scrollToRealTime）
+            const origMarkers=[];
+            const tradeMap={};
+            trades.forEach(t=>tradeMap[t.timestamp]=t);
+            candles.forEach(c=>{
+                if(!c.s||c.s.direction==='neutral')return;
+                const ct=Math.floor(c.t/1000);
+                const tr=tradeMap[c.t];
+                if(highlightFilter){
+                    let matched=true;
+                    if(highlightFilter.type==='reason')matched=(tr.exit_reason||'时间到')===highlightFilter.value;
+                    else if(highlightFilter.type==='score'){const bucket=Math.floor(Math.abs(tr.score)/10)*10;matched=bucket===highlightFilter.value;}
+                    if(!matched)return;
+                }
+                if(tr){
+                    const isUp=tr.direction==='bullish';
+                    origMarkers.push({time:ct,position:isUp?'belowBar':'aboveBar',color:tr.correct?'#2ecc71':'#e74c3c',shape:isUp?'arrowUp':'arrowDown',text:tr.correct?'✅':'❌',size:highlightFilter?2.0:1.5});
+                }else{
+                    origMarkers.push({time:ct,position:'inBar',color:'#525f7a',shape:'diamond',text:'',size:0.6});
+                }
+            });
+            candleSeries.setMarkers(origMarkers);
+        },1500);
+    }
 }
 
 function renderStats(){
-    if(!stats||!stats.total_trades){document.getElementById('st-total').textContent='0';document.getElementById('st-accuracy').textContent='--%';return}
-    document.getElementById('st-total').textContent=stats.total_trades;
-    document.getElementById('st-bullish').innerHTML='📈 '+stats.correct_bullish+'/'+stats.bullish;
-    document.getElementById('st-bearish').innerHTML='📉 '+stats.correct_bearish+'/'+stats.bearish;
-    document.getElementById('st-correct').textContent=stats.correct;
-    document.getElementById('st-wrong').textContent=stats.wrong;
-    const acc=document.getElementById('st-accuracy');acc.textContent=stats.accuracy+'%';acc.style.color=stats.accuracy>=60?'#2ecc71':(stats.accuracy>=40?'#f1c40f':'#e74c3c');
-    const pnl=document.getElementById('st-pnl');pnl.textContent=(stats.total_pnl_pct>=0?'+':'')+stats.total_pnl_pct+'%';pnl.style.color=stats.total_pnl_pct>=0?'#2ecc71':'#e74c3c';
-    document.getElementById('st-winrate').textContent=stats.win_rate+'%';
-    document.getElementById('st-profitfactor').textContent=stats.profit_factor;
-    document.getElementById('st-avgwin').textContent=(stats.avg_win>=0?'+':'')+stats.avg_win+'%';
-    document.getElementById('st-avgloss').textContent=stats.avg_loss+'%';
-    document.getElementById('st-conwins').textContent=stats.max_consecutive_wins;
-    document.getElementById('st-conlosses').textContent=stats.max_consecutive_losses;
+    // 费用过滤开启时：用过滤后的trades重算stats
+    const feeFilterOn=document.getElementById('chk-fee-filter').checked;
+    let useStats=stats;
+    if(feeFilterOn&&trades&&trades.length){
+        const ft=getFilteredTrades(trades);
+        const total=ft.length;
+        if(!total){document.getElementById('st-total').textContent='0 (过滤)';return}
+        useStats={
+            total_trades:total,
+            correct:ft.filter(t=>t.correct).length,
+            wrong:total-ft.filter(t=>t.correct).length,
+            accuracy:Math.round(ft.filter(t=>t.correct).length/total*1000)/10,
+            total_pnl_pct:ft.reduce((s,t)=>s+t.pnl_pct,0),
+            win_rate:Math.round(ft.filter(t=>t.pnl_pct>0).length/total*1000)/10,
+        };
+        const wins=ft.filter(t=>t.pnl_pct>0);
+        const losses=ft.filter(t=>t.pnl_pct<=0);
+        useStats.avg_win=wins.length?Math.round(ft.filter(t=>t.pnl_pct>0).reduce((s,t)=>s+t.pnl_pct,0)/wins.length*100)/100:0;
+        useStats.avg_loss=losses.length?Math.round(ft.filter(t=>t.pnl_pct<=0).reduce((s,t)=>s+t.pnl_pct,0)/losses.length*100)/100:0;
+        useStats.profit_factor=useStats.avg_loss?Math.abs(useStats.avg_win/useStats.avg_loss):0;
+        useStats.bullish=ft.filter(t=>t.direction==='bullish').length;
+        useStats.bearish=ft.filter(t=>t.direction==='bearish').length;
+        useStats.correct_bullish=ft.filter(t=>t.direction==='bullish'&&t.correct).length;
+        useStats.correct_bearish=ft.filter(t=>t.direction==='bearish'&&t.correct).length;
+        // 连赢连亏
+        let cw=0,cl=0,mcw=0,mcl=0;
+        ft.forEach(t=>{if(t.pnl_pct>0){cw++;cl=0;mcw=Math.max(mcw,cw);}else{cl++;cw=0;mcl=Math.max(mcl,cl);}});
+        useStats.max_consecutive_wins=mcw;
+        useStats.max_consecutive_losses=mcl;
+    }
+    if(!useStats||!useStats.total_trades){
+        document.getElementById('st-total').textContent=realtimeMode?'0 (实时)':'0';
+        document.getElementById('st-accuracy').textContent='--%';
+        document.getElementById('st-bullish').innerHTML='📈 0/0';
+        document.getElementById('st-bearish').innerHTML='📉 0/0';
+        document.getElementById('st-correct').textContent='0';
+        document.getElementById('st-wrong').textContent='0';
+        document.getElementById('st-pnl').textContent='--%';
+        document.getElementById('st-winrate').textContent='0%';
+        document.getElementById('st-profitfactor').textContent='--';
+        document.getElementById('st-avgwin').textContent='--%';
+        document.getElementById('st-avgloss').textContent='--%';
+        document.getElementById('st-conwins').textContent='--';
+        document.getElementById('st-conlosses').textContent='--';
+        return
+    }
+    const prefix=realtimeMode?'🔴 ':'✅ ';
+    document.getElementById('st-total').textContent=prefix+useStats.total_trades;
+    document.getElementById('st-bullish').innerHTML='📈 '+useStats.correct_bullish+'/'+useStats.bullish;
+    document.getElementById('st-bearish').innerHTML='📉 '+useStats.correct_bearish+'/'+useStats.bearish;
+    document.getElementById('st-correct').textContent=useStats.correct;
+    document.getElementById('st-wrong').textContent=useStats.wrong;
+    const acc=document.getElementById('st-accuracy');acc.textContent=Number(useStats.accuracy).toFixed(1)+'%';acc.style.color=useStats.accuracy>=60?'#2ecc71':(useStats.accuracy>=40?'#f1c40f':'#e74c3c');
+    const pnl=document.getElementById('st-pnl');pnl.textContent=(useStats.total_pnl_pct>=0?'+':'')+Number(useStats.total_pnl_pct).toFixed(2)+'%';pnl.style.color=useStats.total_pnl_pct>=0?'#2ecc71':'#e74c3c';
+    document.getElementById('st-winrate').textContent=useStats.win_rate+'%';
+    document.getElementById('st-profitfactor').textContent=Number(useStats.profit_factor).toFixed(2);
+    document.getElementById('st-avgwin').textContent=(useStats.avg_win>=0?'+':'')+Number(useStats.avg_win).toFixed(2)+'%';
+    document.getElementById('st-avgloss').textContent=Number(useStats.avg_loss).toFixed(2)+'%';
+    document.getElementById('st-conwins').textContent=useStats.max_consecutive_wins;
+    document.getElementById('st-conlosses').textContent=useStats.max_consecutive_losses;
 }
 
 function renderTable(){
-    if(!trades.length){document.getElementById('table-wrap').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
-    const sorted=[...trades].reverse();
-    let html='<table><thead><tr><th>#</th><th>时间</th><th>方向</th><th>评分</th><th>入场价</th><th>出场价</th><th>PnL%</th><th>结果</th></tr></thead><tbody>';
+    const ft=getFilteredTrades(trades);
+    if(!ft.length){document.getElementById('table-wrap').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
+    const sorted=[...ft].reverse();
+    let html='<table><thead><tr><th style="width:24px">#</th><th style="width:75px">时间</th><th>方向</th><th>评分</th><th>入场价</th><th>出场价</th><th>PnL%</th><th>结果</th><th>原因</th></tr></thead><tbody>';
     sorted.forEach((t,i)=>{
         const dirCls=t.direction==='bullish'?'td-up':'td-down',dirTxt=t.direction==='bullish'?'📈 多':'📉 空';
         const pnlCls=t.pnl_pct>=0?'td-pnl-pos':'td-pnl-neg',pnlTxt=(t.pnl_pct>=0?'+':'')+t.pnl_pct+'%';
         const resCls=t.correct?'td-ok':'td-fail',resTxt=t.correct?'✅':'❌';
-        html+='<tr><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+t.score+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td></tr>';
+        html+='<tr onclick="jumpToTrade('+t.timestamp+')" style="cursor:pointer"><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+Math.abs(t.score)+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td><td style="font-size:9px;color:#525f7a;white-space:nowrap">'+(t.exit_reason||'')+'</td></tr>';
     });
     document.getElementById('table-wrap').innerHTML=html+'</tbody></table>';
 }
 
 function renderDistChart(){
-    if(!trades.length){document.getElementById('dist-chart').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
-    const pnls=trades.map(t=>t.pnl_pct),minPnl=Math.floor(Math.min(...pnls)),maxPnl=Math.ceil(Math.max(...pnls));
+    const ft=getFilteredTrades(trades);
+    if(!ft.length){document.getElementById('dist-chart').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
+    const pnls=ft.map(t=>t.pnl_pct),minPnl=Math.floor(Math.min(...pnls)),maxPnl=Math.ceil(Math.max(...pnls));
     const binCount=Math.max(10,Math.min(30,Math.ceil((maxPnl-minPnl)/0.5))),binWidth=(maxPnl-minPnl)/binCount||0.1;
     const bins=[];for(let i=0;i<binCount;i++){const lo=minPnl+i*binWidth,hi=lo+binWidth;bins.push({lo,hi,count:pnls.filter(p=>p>=lo&&(i===binCount-1?p<=hi:p<hi)).length,isWin:lo>=0})}
     const maxCount=Math.max(...bins.map(b=>b.count),1);
@@ -313,11 +871,64 @@ function renderDistChart(){
     document.getElementById('dist-chart').innerHTML=html;
 }
 
+function renderScoreChart(){
+    const ft=getFilteredTrades(trades);
+    if(!ft.length){document.getElementById('score-panel').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
+    const byScore={};
+    ft.forEach(t=>{
+        const b=Math.floor(Math.abs(t.score)/10)*10;
+        if(!byScore[b])byScore[b]={total:0,correct:0,wrong:0};
+        byScore[b].total++;
+        if(t.correct)byScore[b].correct++;else byScore[b].wrong++;
+    });
+    const keys=Object.keys(byScore).map(Number).sort((a,b)=>a-b);
+    const maxTotal=Math.max(...keys.map(k=>byScore[k].total),1);
+    let html='<div style="padding:4px 0;font-size:10px;color:#525f7a;margin-bottom:4px">评分分布</div>';
+    keys.forEach(k=>{
+        const d=byScore[k];
+        const acc=d.total>0?Math.round(d.correct/d.total*100):0;
+        const w=Math.max(d.total/maxTotal*100,5);
+        const barColor=acc>=60?'#2ecc71':(acc>=40?'#f1c40f':'#e74c3c');
+        const selected=(highlightFilter&&highlightFilter.type==='score'&&highlightFilter.value===k);
+        html+='<div class="dist-bar-wrap" style="cursor:pointer;opacity:'+(highlightFilter&&!selected?0.4:1)+'" onclick="setHighlight(\'score\',"+k+")"><span class="dist-label">'+k+'~'+(k+10)+'</span>'
+            +'<div class="dist-bar-bg"><div class="dist-bar-fill" style="width:'+w+'%;background:'+barColor+'">'+d.total+'</div></div>'
+            +'<span style="font-size:9px;color:#8892b0;width:40px;text-align:left">'+(d.correct>0?'<span style="color:#2ecc71">'+d.correct+'</span>/':'')+(d.wrong>0?'<span style="color:#e74c3c">'+d.wrong+'</span>':'')+'</span>'
+            +'<span style="font-size:9px;color:'+barColor+';width:30px;text-align:left">'+acc+'%</span></div>';
+    });
+    html+='<div style="margin-top:8px;font-size:10px;color:#525f7a">离场原因分布</div>';
+    const reasons={};
+    ft.forEach(t=>{const r=t.exit_reason||'时间到';if(!reasons[r])reasons[r]=0;reasons[r]++;});
+    Object.keys(reasons).sort((a,b)=>reasons[b]-reasons[a]).forEach(r=>{
+        const pct=Math.round(reasons[r]/ft.length*100);
+        const icon=r==='止盈'?'🎯':(r==='止损'?'🛑':'⏱️');
+        html+='<div class="dist-bar-wrap"><span class="dist-label" style="width:60px;cursor:pointer" onclick="setHighlight(\'reason\',\''+r+'\')" title="点击高亮">'+icon+r+'</span><div class="dist-bar-bg"><div class="dist-bar-fill" style="width:'+pct+'%;background:#525f7a">'+reasons[r]+'</div></div><span class="dist-count">'+pct+'%</span></div>';
+    });
+    html+='<div style="margin-top:4px;font-size:9px;color:#525f7a">点击可高亮K线图中的对应交易</div>';
+    if(highlightFilter)html+='<div style="margin-top:4px"><button onclick="clearHighlight()" style="padding:2px 8px;border:none;border-radius:3px;font-size:10px;background:#667eea;color:#fff;cursor:pointer">清除高亮</button></div>';
+    document.getElementById('score-panel').innerHTML=html;
+}
+
+function setHighlight(type,value){
+    highlightFilter={type,value};
+    renderChart(true);
+    renderScoreChart();
+}
+
+function clearHighlight(){
+    highlightFilter=null;
+    renderChart(true);
+    renderScoreChart();
+}
+
 function switchTab(tab){
     document.querySelectorAll('.panel-tab').forEach(el=>el.classList.remove('active'));
     document.querySelector('.panel-tab[data-tab="'+tab+'"]').classList.add('active');
     document.getElementById('table-wrap').style.display=tab==='list'?'block':'none';
     document.getElementById('dist-chart').style.display=tab==='dist'?'block':'none';
+    document.getElementById('pos-panel').style.display=tab==='pos'?'block':'none';
+    document.getElementById('score-panel').style.display=tab==='score'?'block':'none';
+    if(tab==='pos')updatePosPanel();
+    if(tab==='score')renderScoreChart();
 }
 
 initChart();

@@ -1,8 +1,26 @@
+# Python
 __pycache__/
-*.pyc
-.DS_Store
-reasonix.toml
-.reasonix/
-*.parquet
-*.csv
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# 环境
 .env
+venv/
+.venv/
+
+# 数据 - 忽略整个data目录
+data/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log

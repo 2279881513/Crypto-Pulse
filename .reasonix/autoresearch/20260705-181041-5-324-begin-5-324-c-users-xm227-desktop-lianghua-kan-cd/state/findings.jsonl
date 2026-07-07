@@ -1,0 +1,1 @@
+{"id":"f1","kind":"file","summary":"__init__.py and signal.py have been modified with new weights, ADX filter, and threshold 30","source":"read_file","paths":["cryptopulse/core/indicators/__init__.py","cryptopulse/core/indicators/signal.py"],"accepted":true,"created_at":"2026-07-05T18:10:51.3038986Z"}

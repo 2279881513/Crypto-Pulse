@@ -72,7 +72,7 @@ class Settings:
 
     # 交易
     default_style: TradingStyle = TradingStyle.SHORT_TERM
-    default_symbol: str = "BTC-USDT"
+    default_symbol: str = "BTC-USDT-SWAP"
     risk_per_trade: float = 0.02
     max_position_pct: float = 0.5
 

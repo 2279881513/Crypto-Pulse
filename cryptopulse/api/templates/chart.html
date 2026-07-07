@@ -93,8 +93,6 @@ html,body{height:100%;overflow:hidden;background:#0b0e17;font-family:-apple-syst
     </div>
     <div class="tb-r">
         <span id="tb-cd"></span>
-        <input id="ch-capital" type="number" value="50" min="10" step="10" style="width:52px;background:#131a2b;border:1px solid #1e2a45;border-radius:4px;color:#e8edf5;padding:2px 6px;font-size:10px;outline:none" title="本金 USDT">
-        <input id="ch-lev" type="number" value="10" min="1" max="125" step="1" style="width:38px;background:#131a2b;border:1px solid #1e2a45;border-radius:4px;color:#e8edf5;padding:2px 6px;font-size:10px;outline:none" title="杠杆">
         <span style="color:#525f7a;font-size:10px">$<span id="ch-pos-size">500</span></span>
         <button id="btn-markers" class="btn-r" onclick="toggleMarkers()" style="background:transparent;border:1px solid #1e2a45;font-size:10px">🔵 信号</button>
         <button id="btn-histpred" class="btn-r" onclick="toggleHistPred()" style="background:transparent;border:1px solid #525f7a;font-size:10px;color:#525f7a">📊 预测</button>
@@ -111,9 +109,9 @@ html,body{height:100%;overflow:hidden;background:#0b0e17;font-family:-apple-syst
 
 <div id="pos-bar" style="display:flex;gap:10px;align-items:center;flex-shrink:0;background:#131a2b;border:1px solid #1e2a45;border-radius:6px;padding:4px 12px;margin:4px 0 2px 0;font-size:11px;cursor:pointer" onclick="togglePosDetail()" title="点击展开仓位详情">
     <span style="color:#525f7a">本金</span>
-    <input id="pos-capital" type="number" value="1000" min="10" step="100" style="width:70px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:2px 6px;font-size:11px;font-family:'Courier New',monospace" onclick="event.stopPropagation()">
+    <input id="pos-capital" type="text" inputmode="numeric" value="1000" style="width:70px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:2px 6px;font-size:11px;font-family:'Courier New',monospace" onclick="event.stopPropagation()">
     <span style="color:#525f7a">杠杆</span>
-    <input id="pos-leverage" type="number" value="1" min="1" max="125" step="1" style="width:50px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:2px 6px;font-size:11px;font-family:'Courier New',monospace" onclick="event.stopPropagation()">
+    <input id="pos-leverage" type="text" inputmode="numeric" value="1" style="width:50px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:2px 6px;font-size:11px;font-family:'Courier New',monospace" onclick="event.stopPropagation()">
     <span style="color:#525f7a">费率</span>
     <select id="pos-fee" style="background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:2px 4px;font-size:10px" onclick="event.stopPropagation()">
         <option value="0.0005">0.05%</option><option value="0.0002">0.02%</option><option value="0.001">0.10%</option>
@@ -324,7 +322,7 @@ function initChart() {
             secondsVisible: false,
             tickMarkFormatter: (t) => {
                 const d = new Date(t * 1000);
-                return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+                return String(d.getUTCHours()).padStart(2,'0') + ':' + String(d.getUTCMinutes()).padStart(2,'0');
             },
         },
         rightPriceScale: { borderColor: '#1a2340', autoScale: true },
@@ -393,7 +391,7 @@ function initChart() {
             addLine(nearest.s.tp3, 'rgba(46,204,113,0.4)', 'TP3', 4);
         }
         const dirMap = {bullish:'📈 做多', bearish:'📉 做空', neutral:'⏸️ 观望'};
-        const sigHtml = nearest.s ? '<div style="margin-top:3px;padding:2px 6px;border-radius:3px;text-align:center;font-weight:600;font-size:10px;background:' + (nearest.s.direction==='bullish'?'rgba(46,204,113,0.15)':nearest.s.direction==='bearish'?'rgba(231,76,60,0.15)':'rgba(82,95,122,0.15)') + ';color:' + (nearest.s.direction==='bullish'?'#2ecc71':nearest.s.direction==='bearish'?'#e74c3c':'#525f7a') + '">' + (dirMap[nearest.s.direction]||'') + ' · 技术评分 ' + nearest.s.score + ' · 信心度 ' + nearest.s.confidence + '%</div>' : '';
+        const sigHtml = nearest.s ? '<div style="margin-top:3px;padding:2px 6px;border-radius:3px;text-align:center;font-weight:600;font-size:10px;background:' + (nearest.s.direction==='bullish'?'rgba(46,204,113,0.15)':nearest.s.direction==='bearish'?'rgba(231,76,60,0.15)':'rgba(82,95,122,0.15)') + ';color:' + (nearest.s.direction==='bullish'?'#2ecc71':nearest.s.direction==='bearish'?'#e74c3c':'#525f7a') + '">' + (dirMap[nearest.s.direction]||'') + ' · 技术评分 ' + Math.abs(nearest.s.score) + ' · 信心度 ' + nearest.s.confidence + '%</div>' : '';
         const planHtml = (nearest.s && nearest.s.direction !== 'neutral') ? '<div style="border-top:1px solid #1e2a45;margin-top:4px;padding-top:4px"><div class="tr"><span class="tl">建议入场</span><span class="tv" style="color:' + (nearest.s.direction==='bullish'?'#2ecc71':'#e74c3c') + '">' + nearest.s.entry.toFixed(1) + '</span></div><div class="tr"><span class="tl">止损价</span><span class="tv" style="color:#e74c3c">' + nearest.s.sl.toFixed(1) + '</span><span class="tl">止盈1</span><span class="tv" style="color:#2ecc71">' + nearest.s.tp1.toFixed(1) + '</span></div><div class="tr"><span class="tl">止盈2</span><span class="tv" style="color:#2ecc71">' + nearest.s.tp2.toFixed(1) + '</span><span class="tl">止盈3</span><span class="tv" style="color:#2ecc71">' + nearest.s.tp3.toFixed(1) + '</span></div></div>' : '';
         tipEl.innerHTML = '<div style="font-size:10px;color:#525f7a;margin-bottom:2px">' + tsStr + ' (北京时间)</div>'
             + '<div class="tr"><span class="tl">开盘价</span><span class="tv" style="color:' + (isUp?'#2ecc71':'#e74c3c') + '">' + nearest.o.toFixed(1) + '</span><span class="tl">最高价</span><span class="tv">' + nearest.h.toFixed(1) + '</span></div>'
@@ -434,12 +432,12 @@ function initChart() {
         for (const c of candles) { const d = Math.abs(c.t - ts); if (d < minDist) { minDist = d; nearest = c; } }
         if (!nearest || minDist > 120000) return;
         const d = new Date(nearest.t);
-        const tsStr = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0')+' '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');
+        const tsStr = d.getUTCFullYear()+'-'+String(d.getUTCMonth()+1).padStart(2,'0')+'-'+String(d.getUTCDate()).padStart(2,'0')+' '+String(d.getUTCHours()).padStart(2,'0')+':'+String(d.getUTCMinutes()).padStart(2,'0');
         const isUp = nearest.c >= nearest.o, c2 = isUp ? '#2ecc71' : '#e74c3c';
         const dirMap = {bullish:'📈 做多', bearish:'📉 做空', neutral:'⏸️ 观望'};
         const dc = nearest.s ? (nearest.s.direction === 'bullish' ? '#2ecc71' : nearest.s.direction === 'bearish' ? '#e74c3c' : '#525f7a') : '#525f7a';
         const dirText = nearest.s ? (dirMap[nearest.s.direction] || '--') : '--';
-        const scoreText = nearest.s ? nearest.s.score + ' · ' + nearest.s.confidence + '%' : '';
+        const scoreText = nearest.s ? Math.abs(nearest.s.score) + ' · ' + nearest.s.confidence + '%' : '';
 
         document.getElementById('dl-time').textContent = tsStr;
         const dirEl = document.getElementById('dl-dir');

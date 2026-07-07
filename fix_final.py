@@ -1,34 +1,41 @@
-"""完全替换 _signal_at 为 64.8% 的1m+5m双框架版本"""
+"""一键恢复纯1m评分系统，删除5m/15m无用代码"""
+with open('cryptopulse/api/app.py','r',encoding='utf-8') as f:
+    c=f.read()
+
+# 删除5m加载代码块 (从"=== 加载 5m 数据"到下一个"def _signal_at"之前的空行)
 import re
+# 找到5m和15m加载块并删除
+c = re.sub(
+    r'        # === 加载 5m 数据做多时间框架分析 ===.*?(?=\n        def _signal_at)',
+    '',
+    c,
+    flags=re.DOTALL
+)
 
-with open('cryptopulse/api/app.py', 'r', encoding='utf-8') as f:
-    c = f.read()
+# 删除15m加载块
+c = re.sub(
+    r'        # === 加载 15m 数据 ===.*?(?=\n        engine = TechnicalSignalEngine)',
+    '',
+    c,
+    flags=re.DOTALL
+)
 
-# 找到 _signal_at 函数体
-start = c.find('def _signal_at(i: int) -> Optional[dict]:')
-body_start = c.find('"""', start) + 3
-body_end = c.find('        candles_out = []', body_start)
-
-# 新函数体 (正确的 64.8% 版本)
-new_body = '"""计算第 i 根 K 线处的信号（1m+5m双框架）"""\n'
-new_body += '''            if i < 99:
-                return None
-            price = close[i]
-            ema_f, ema_m, ema_s = all_ema_f[i], all_ema_m[i], all_ema_s[i]
-            macd_l, macd_s, macd_h = all_macd_line[i], all_macd_sig[i], all_macd_hist[i]
-            rsi_v = all_rsi[i]
-            bb_u, bb_m, bb_l = all_bb_upper[i], all_bb_mid[i], all_bb_lower[i]
-            atr_v = all_atr[i]
-            adx_v = all_adx[i]
-            obv_v = all_obv[i]
-            vol_ma20_v = all_vol_ma20[i]
-            idx5=idx_5m_map[i] if idx_5m_map is not None else -1
-            has5=idx5>=0 and all_ema_f5 is not None and not np.isnan(all_ema_f5[idx5])
-
-            signals={}
-            w={"ema":0.10,"momentum":0.08,"macd":0.08,"rsi":0.08,"micro":0.06,"bollinger":0.06,"volume":0.06,"obv":0.06,"adx_filter":0.06,"tf5_trend":0.18,"tf5_adx":0.08,"tf5_rsi":0.06,"tf5_macd":0.04}
+# 恢复到旧版的1m评分(替换_signal_at内的完整函数体)
+old_start = c.find('            s={}')
+if old_start >= 0:
+    # 找到这个_signal_at函数的结束
+    ret_pos = c.find('            return {"direction":d.value,"score":round(sc,1),"confidence":cf}', old_start)
+    if ret_pos < 0:
+        ret_pos = c.find('            return {"direction":d.value,"score":round', old_start)
+    
+    if ret_pos > old_start:
+        old_sig = c[old_start:ret_pos]
+        # 找到return结束位置
+        ret_end = ret_pos + len('            return {"direction":d.value,"score":round(sc,1),"confidence":cf}')
+        
+        new_sig = '''            signals={}
+            w={"ema":0.15,"momentum":0.13,"macd":0.13,"rsi":0.13,"micro":0.12,"bollinger":0.10,"volume":0.08,"obv":0.08,"adx_filter":0.08}
             vr=vol[i]/vol_ma20_v if vol_ma20_v>0 else 0
-
             if not np.isnan(ema_f) and not np.isnan(ema_m) and not np.isnan(ema_s):
                 al=ema_f>ema_m>ema_s;be=ema_f<ema_m<ema_s
                 if al and price>ema_f: signals["ema"]=-1.0
@@ -98,47 +105,35 @@ new_body += '''            if i < 99:
             if adx_l>=25 and adx_l<=40: signals["adx_filter"]=0.3
             elif adx_l>40: signals["adx_filter"]=0.8
             else: signals["adx_filter"]=-0.5
-
-            # 5m 趋势
-            if has5:
-                ef5,em5,es5=all_ema_f5[idx5],all_ema_m5[idx5],all_ema_s5[idx5]
-                c5_price=all_ema_f5[idx5]
-                if ef5>em5>es5 and c5_price>ef5: signals["tf5_trend"]=1.0
-                elif ef5>em5>es5: signals["tf5_trend"]=0.5
-                elif ef5<em5<es5 and c5_price<ef5: signals["tf5_trend"]=-1.0
-                elif ef5<em5<es5: signals["tf5_trend"]=-0.5
-                else: signals["tf5_trend"]=0.0
-                adx5=all_adx5[idx5] if not np.isnan(all_adx5[idx5]) else 0
-                if adx5>=35: signals["tf5_adx"]=0.8
-                elif adx5>=25: signals["tf5_adx"]=0.3
-                else: signals["tf5_adx"]=-0.5
-                rsi5=all_rsi5[idx5] if not np.isnan(all_rsi5[idx5]) else 50
-                if rsi5>75: signals["tf5_rsi"]=-0.5
-                elif rsi5<25: signals["tf5_rsi"]=0.5
-                else: signals["tf5_rsi"]=0.0
-                mh5=all_macd_h5[idx5] if not np.isnan(all_macd_h5[idx5]) else 0
-                if mh5>0: signals["tf5_macd"]=0.5
-                elif mh5<0: signals["tf5_macd"]=-0.5
-                else: signals["tf5_macd"]=0.0
-            else:
-                signals["tf5_trend"]=0.0;signals["tf5_adx"]=0.0;signals["tf5_rsi"]=0.0;signals["tf5_macd"]=0.0
-
             total=sum(signals.get(k,0)*w.get(k,0) for k in w)
             total_score=max(-100,min(100,total*100))
-            direction=Direction.NEUTRAL
-            if total_score>30: direction=Direction.BULLISH
-            elif total_score<-30: direction=Direction.BEARISH
-            if direction!=Direction.NEUTRAL and adx_l<25: direction=Direction.NEUTRAL
+            d=Direction.NEUTRAL
+            if total_score>37: d=Direction.BULLISH
+            elif total_score<-37: d=Direction.BEARISH
+            if d!=Direction.NEUTRAL and adx_l<25: d=Direction.NEUTRAL
             conf=min(100,max(10,int(abs(total_score)*0.9+min(adx_l*1.0,20))))
-            if direction!=Direction.NEUTRAL and conf<45: direction=Direction.NEUTRAL
-            return {"direction":direction.value,"score":round(total_score,1),"confidence":conf}
-'''
+            if d!=Direction.NEUTRAL and conf<50: d=Direction.NEUTRAL
+            return {"direction":d.value,"score":round(total_score,1),"confidence":conf}'''
+        
+        c = c[:old_start] + new_sig + c[ret_end:]
+        print("✅ _signal_at 已恢复纯1m均值回归评分")
+    else:
+        print("❌ 未找到return")
+else:
+    print("❌ 未找到s={}")
 
-c2 = c[:body_start] + new_body + c[body_end:]
+# 同样修复导出函数
+# 找到export函数里的评分
+for marker in ['direction_str="bullish" if total_score>37 else', 'direction_str="bullish" if total_score>30 else']:
+    idx = c.find(marker)
+    if idx >= 0:
+        break
 
-# 写回
-with open('cryptopulse/api/app.py', 'w', encoding='utf-8') as f:
-    f.write(c2)
+if idx >= 0:
+    # 这个已经在export里用了37阈值，不需要修改
+    pass
 
-print("✅ _signal_at 已完全替换为 64.8% 版本")
-print("重启web服务后跑回测验证")
+with open('cryptopulse/api/app.py','w',encoding='utf-8') as f:
+    f.write(c)
+print("✅ 恢复完成！重启服务跑回测。")
+print("预期: 57%准确率, ~740信号, 盈亏比1.4")
