@@ -24,3 +24,11 @@ Thumbs.db
 
 # 日志
 *.log
+
+# AI 辅助工具
+.reasonix/
+
+# 临时修复脚本
+fix_*.py
+restore_*.py
+fix_export.py
