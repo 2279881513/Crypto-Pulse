@@ -355,7 +355,7 @@ def backtest_page():
 
 def _compute_signal(i,close,high,low,openp,vol,
                      all_ema_f,all_ema_m,all_ema_s,all_macd_hist,all_rsi,
-                     all_bb_upper,all_bb_mid,all_bb_lower,all_adx,all_obv,all_vol_ma20,
+                     all_bb_upper,all_bb_mid,all_bb_lower,all_atr,all_adx,all_obv,all_vol_ma20,
                      all_ema_f5=None,all_ema_m5=None,all_ema_s5=None,
                      all_adx5=None,all_rsi5=None,all_macd_h5=None,c5=None,idx_5m_map=None):
     """1m+5m双框架评分 — 与回测完全一致"""
@@ -368,7 +368,7 @@ def _compute_signal(i,close,high,low,openp,vol,
     idx5=idx_5m_map[i] if idx_5m_map is not None else -1
     has5=idx5>=0 and all_ema_f5 is not None and not np.isnan(all_ema_f5[idx5])
     s={}
-    w={"ema":0.15,"momentum":0.10,"macd":0.10,"rsi":0.08,"micro":0.06,"bollinger":0.08,"volume":0.06,"obv":0.06,"adx_filter":0.06,"tf5_trend":0.12,"tf5_adx":0.06,"tf5_rsi":0.04,"tf5_macd":0.03}
+    w={"ema":0.12,"momentum":0.06,"macd":0.06,"rsi":0.14,"micro":0.06,"bollinger":0.12,"volume":0.04,"obv":0.04,"adx_filter":0.08,"pullback":0.14,"reversion":0.08,"tf5_trend":0.06,"tf5_adx":0.04,"tf5_rsi":0.02,"tf5_macd":0.01}
     # --- EMA ---
     if not np.isnan(ema_f) and not np.isnan(ema_m) and not np.isnan(ema_s):
         al=ema_f>ema_m>ema_s;be=ema_f<ema_m<ema_s
@@ -396,6 +396,27 @@ def _compute_signal(i,close,high,low,openp,vol,
         elif macd_h<0: s["macd"]=-0.5
         else: s["macd"]=0.0
     else: s["macd"]=0.0
+    # --- 趋势回调入场 (pullback) ---
+    adx_v_now=adx_v if not np.isnan(adx_v) else 0
+    atr_now=all_atr[i] if not np.isnan(all_atr[i]) else price*0.005
+    ema_signal=s.get("ema",0)
+    ema_abs=abs(ema_signal)
+    if adx_v_now>=30 and ema_abs>0 and i>=1:
+        ema_f_now=all_ema_f[i] if not np.isnan(all_ema_f[i]) else price
+        dist_pct=abs(price-ema_f_now)/price*100
+        dist_atr=abs(price-ema_f_now)/(atr_now+1e-10)
+        if ema_signal>0 and dist_atr<0.3:
+            s["pullback"]=0.8  # 多头趋势回踩EMA
+        elif ema_signal<0 and dist_atr<0.3:
+            s["pullback"]=-0.8  # 空头趋势反弹EMA
+        elif ema_signal>0 and dist_atr>2.0:
+            s["pullback"]=-0.4  # 远离EMA→超买风险
+        elif ema_signal<0 and dist_atr>2.0:
+            s["pullback"]=0.4   # 远离EMA→超卖机会
+        else:
+            s["pullback"]=0.0
+    else:
+        s["pullback"]=0.0
     # --- RSI ---
     if not np.isnan(rsi_v):
         r=rsi_v
@@ -415,6 +436,22 @@ def _compute_signal(i,close,high,low,openp,vol,
         elif price>bb_l: s["bollinger"]=-0.3
         else: s["bollinger"]=0.7
     else: s["bollinger"]=0.0
+    # --- RSI+BB 极端反转 (reversion) ---
+    if not np.isnan(rsi_v) and not np.isnan(bb_u):
+        at_bb_low = price <= bb_l + (bb_m - bb_l)*0.1
+        at_bb_high = price >= bb_u - (bb_u - bb_m)*0.1
+        if rsi_v<30 and at_bb_low:
+            s["reversion"]=1.0
+        elif rsi_v>70 and at_bb_high:
+            s["reversion"]=-1.0
+        elif rsi_v<35 and price<bb_m:
+            s["reversion"]=0.5
+        elif rsi_v>65 and price>bb_m:
+            s["reversion"]=-0.5
+        else:
+            s["reversion"]=0.0
+    else:
+        s["reversion"]=0.0
     # --- 成交量 ---
     if vr>1.5:
         chg=(close[i]-close[i-4])/close[i-4] if i>=4 else 0
@@ -480,20 +517,29 @@ def _compute_signal(i,close,high,low,openp,vol,
         s["tf5_trend"]=0.0;s["tf5_adx"]=0.0;s["tf5_rsi"]=0.0;s["tf5_macd"]=0.0
     total=sum(s.get(k,0)*w.get(k,0) for k in w)
     total_score=max(-100,min(100,total*100))
-    d="neutral"
-    if has5:
-        tf5_val=s.get("tf5_trend",0)
-        if total_score>40:
-            d="neutral" if tf5_val<=-0.5 else "bullish"
-        elif total_score<-40:
-            d="neutral" if tf5_val>=0.5 else "bearish"
+    # ---- ADX 分模式动态阈值 ----
+    if adx_l>=35:
+        eff_th=25
+    elif adx_l>=25:
+        eff_th=35
     else:
-        if total_score>40: d="bullish"
-        elif total_score<-40: d="bearish"
-    if d!="neutral" and adx_l<25 and abs(total_score)<50:
+        eff_th=45
+
+    d="neutral"
+    if total_score>eff_th:
+        d="bullish"
+        # 5m强反向趋势时降低信心但不硬过滤
+        if has5 and s.get("tf5_trend",0)<=-0.8 and abs(total_score)<eff_th+10:
+            d="neutral"
+    elif total_score<-eff_th:
+        d="bearish"
+        if has5 and s.get("tf5_trend",0)>=0.8 and abs(total_score)<eff_th+10:
+            d="neutral"
+    # ---- 仅ADX极低时弱趋势过滤 ----
+    if d!="neutral" and adx_l<20 and abs(total_score)<eff_th+10:
         d="neutral"
     cf=min(100,max(10,int(abs(total_score)*0.9+min(adx_l*1.0,20))))
-    if d!="neutral" and cf<35: d="neutral"
+    if d!="neutral" and cf<25: d="neutral"
     reason=[]
     if s.get("ema",0)>0.5: reason.append("EMA↑")
     elif s.get("ema",0)<-0.5: reason.append("EMA↓")
@@ -524,7 +570,7 @@ def api_backtest():
     try:
         symbol = os.environ.get("SYMBOL", "BTC-USDT")
         style = request.args.get("style", "short_term")
-        lookahead = request.args.get("lookahead", 3, type=int)
+        lookahead = request.args.get("lookahead", 6, type=int)
         bar = "1m" if style == "short_term" else "4H"
         # 止盈止损参数（百分比）
         sl_pct = request.args.get("sl", 0.0, type=float)
@@ -651,18 +697,31 @@ def api_backtest():
         candles_out = []
         signals_raw = []
         all_signals = []  # 所有信号（含观望）
+        # 进场冷却：同一方向连续信号间隔不足 cool_bars 根 K 线时跳过
+        cool_bars = 3  # 冷却 K 线数
+        last_trade_dir = None
+        last_trade_idx = -cool_bars
         for i in range(len(df)):
             signal = _compute_signal(i, close, high, low, openp, vol,
                     all_ema_f, all_ema_m, all_ema_s, all_macd_hist, all_rsi,
-                    all_bb_upper, all_bb_mid, all_bb_lower, all_adx, all_obv, all_vol_ma20,
+                    all_bb_upper, all_bb_mid, all_bb_lower, all_atr, all_adx, all_obv, all_vol_ma20,
                     all_ema_f5, all_ema_m5, all_ema_s5,
                     all_adx5, all_rsi5, all_macd_h5, c5, idx_5m_map)
             ts = int(df["timestamp"].iloc[i])
             if signal:
                 all_signals.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
                 if signal["direction"] != "neutral":
-                    if trade_start_ms <= 0 or ts >= trade_start_ms:
-                        signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
+                    # 进场冷却检查
+                    dir_now = signal["direction"]
+                    if dir_now == last_trade_dir and i - last_trade_idx < cool_bars:
+                        # 同方向冷却期内，把当前信号标记为"被冷却跳过"但记录在 all_signals
+                        signal["cooled"] = True
+                    else:
+                        signal["cooled"] = False
+                        if trade_start_ms <= 0 or ts >= trade_start_ms:
+                            signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
+                            last_trade_dir = dir_now
+                            last_trade_idx = i
             if not csv_export:
                 candles_out.append({
                     "t": ts,
@@ -678,7 +737,7 @@ def api_backtest():
                 ts = df["timestamp"].iloc[i]
                 sig = _compute_signal(i, close, high, low, openp, vol,
                     all_ema_f, all_ema_m, all_ema_s, all_macd_hist, all_rsi,
-                    all_bb_upper, all_bb_mid, all_bb_lower, all_adx, all_obv, all_vol_ma20,
+                    all_bb_upper, all_bb_mid, all_bb_lower, all_atr, all_adx, all_obv, all_vol_ma20,
                     all_ema_f5, all_ema_m5, all_ema_s5,
                     all_adx5, all_rsi5, all_macd_h5, c5, idx_5m_map)
                 if sig:
@@ -700,52 +759,57 @@ def api_backtest():
             if future_count < lookahead:
                 continue
 
-            exit_price = close[future_end]
-
             is_bullish = sig["direction"] == "bullish"
             is_bearish = sig["direction"] == "bearish"
 
-            # ---- 止盈止损验证 ----
+            # ---- 动态止盈止损: 基于 ATR 计算 ----
+            atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else close[idx] * 0.005
+            # 与 engine.py 保持一致的乘数
+            sl_mult = 1.2
+            tp_mult = 1.3
+            if is_bullish:
+                sl_price = entry_price - atr_entry * sl_mult
+                tp_price = entry_price + atr_entry * 1.5
+                sl_init = sl_price  # 保存初始止损
+            elif is_bearish:
+                sl_price = entry_price + atr_entry * sl_mult
+                tp_price = entry_price - atr_entry * 1.5
+                sl_init = sl_price  # 保存初始止损
+            else:
+                sl_price = entry_price
+                tp_price = entry_price
+
+            # ---- 验证出场 ----
             correct = False
             sl_hit = False
             tp_hit = False
             exit_reason = "时间到"
+
+            # 追踪止损: 记录最高/最低价格
+            best_price = entry_price
+            trail_activated = False  # 追踪是否已激活
 
             for j in range(future_start, future_end + 1):
                 bar_high = high[j]
                 bar_low = low[j]
 
                 if is_bullish:
-                    # 止盈：最高价 >= 入场价 + tp
-                    if tp_pct > 0 and bar_high >= entry_price * (1 + tp_pct / 100):
-                        exit_price = entry_price * (1 + tp_pct / 100)
-                        correct = True
-                        tp_hit = True
-                        exit_reason = "止盈"
-                        break
-                    # 止损：最低价 <= 入场价 - sl
-                    if sl_pct > 0 and bar_low <= entry_price * (1 - sl_pct / 100):
-                        exit_price = entry_price * (1 - sl_pct / 100)
-                        correct = False
-                        sl_hit = True
-                        exit_reason = "止损"
-                        break
+                    # 止盈检查：价格到达TP就止盈
+                    if bar_high >= tp_price:
+                        exit_price = tp_price
+                        correct = True; tp_hit = True; exit_reason = "止盈"; break
+                    # 止损检查：价格跌破SL就止损
+                    if bar_low <= sl_price:
+                        exit_price = sl_price
+                        correct = False; sl_hit = True; exit_reason = "止损"; break
 
                 elif is_bearish:
-                    # 止盈：最低价 <= 入场价 - tp
-                    if tp_pct > 0 and bar_low <= entry_price * (1 - tp_pct / 100):
-                        exit_price = entry_price * (1 - tp_pct / 100)
-                        correct = True
-                        tp_hit = True
-                        exit_reason = "止盈"
-                        break
-                    # 止损：最高价 >= 入场价 + sl
-                    if sl_pct > 0 and bar_high >= entry_price * (1 + sl_pct / 100):
-                        exit_price = entry_price * (1 + sl_pct / 100)
-                        correct = False
-                        sl_hit = True
-                        exit_reason = "止损"
-                        break
+                    if bar_low <= tp_price:
+                        exit_price = tp_price
+                        correct = True; tp_hit = True; exit_reason = "止盈"; break
+                    if bar_high >= sl_price:
+                        exit_price = sl_price
+                        correct = False; sl_hit = True; exit_reason = "止损"; break
 
             # 如果SL/TP都没触发，用收盘价验证方向
             if not sl_hit and not tp_hit:
@@ -766,8 +830,8 @@ def api_backtest():
                 "confidence": sig["confidence"],
                 "entry_price": round(entry_price, 1),
                 "exit_price": round(exit_price, 1),
-                "sl_price": round(entry_price * (1 - sl_pct / 100), 1) if sl_pct > 0 else None,
-                "tp_price": round(entry_price * (1 + tp_pct / 100), 1) if tp_pct > 0 else None,
+                "sl_price": round(sl_init, 1) if is_bullish or is_bearish else None,
+                "tp_price": round(tp_price, 1) if is_bullish or is_bearish else None,
                 "lookahead": lookahead,
                 "correct": correct,
                 "pnl_pct": round(pnl_pct, 2),
@@ -848,24 +912,34 @@ def api_backtest():
                 is_dir = sig["direction"] != "neutral"
                 # SL/TP验证
                 entry_price = p
-                sl_price = entry_price * (1 - sl_pct / 100) if sl_pct > 0 else None
-                tp_price = entry_price * (1 + tp_pct / 100) if tp_pct > 0 else None
+                # 方向对应的SL/TP — 用ATR动态计算
+                atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else p * 0.005
+                sl_price = entry_price - atr_entry * 1.2 if is_dir else None
+                tp_price = entry_price + atr_entry * 1.3 if is_dir else None
+                bull_sl = entry_price - atr_entry * 1.2
+                bull_tp = entry_price + atr_entry * 1.3
+                bear_sl = entry_price + atr_entry * 1.2
+                bear_tp = entry_price - atr_entry * 1.3
                 correct = None; exit_price = None; exit_reason = ""; pnl_pct = None
                 if is_dir:
                     is_bull = sig["direction"] == "bullish"
                     future_end = min(idx + lookahead, len(df) - 1)
                     exit_price = close[future_end]
                     correct = False; exit_reason = "时间到"
+                    _sl = bull_sl if is_bull else bear_sl
+                    _tp = bull_tp if is_bull else bear_tp
+                    sl_init = _sl  # 保存初始止损（未追踪前）
+                    tp_init = _tp  # 保存初始止盈
+                    trail_activated = False
+                    best_p = entry_price
                     for j in range(idx + 1, future_end + 1):
                         bh, bl = high[j], low[j]
                         if is_bull:
-                            if tp_pct > 0 and bh >= tp_price: exit_price = tp_price; correct = True; exit_reason = "止盈"; break
-                            if sl_pct > 0 and bl <= sl_price: exit_price = sl_price; correct = False; exit_reason = "止损"; break
+                            if bh >= _tp: exit_price = _tp; correct = True; exit_reason = "止盈"; break
+                            if bl <= _sl: exit_price = _sl; correct = False; exit_reason = "止损"; break
                         else:
-                            tp_alt = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else None
-                            sl_alt = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else None
-                            if tp_pct > 0 and bl <= tp_alt: exit_price = tp_alt; correct = True; exit_reason = "止盈"; break
-                            if sl_pct > 0 and bh >= sl_alt: exit_price = sl_alt; correct = False; exit_reason = "止损"; break
+                            if bl <= _tp: exit_price = _tp; correct = True; exit_reason = "止盈"; break
+                            if bh >= _sl: exit_price = _sl; correct = False; exit_reason = "止损"; break
                     pnl_pct = round((exit_price / entry_price - 1) * (1 if is_bull else -1) * 100, 4)
                 fee_cost = round(fee_rate * 2 * 100, 3)
                 fee_triggered = is_dir and abs(pnl_pct or 0) < fee_cost
@@ -881,8 +955,9 @@ def api_backtest():
                     "confidence": sig["confidence"],
                     "reason": sig["reason"],
                     "entry_price": round(entry_price, 1) if is_dir else "",
-                    "sl_price": round(sl_price, 1) if is_dir and sl_price else "",
-                    "tp_price": round(tp_price, 1) if is_dir and tp_price else "",
+                    "sl_price": round(sl_init, 1) if is_dir else "",
+                    "tp_price": round(tp_init, 1) if is_dir else "",
+                    "trail_sl": "",
                     "exit_price": round(exit_price, 1) if exit_price else "",
                     "exit_reason": exit_reason,
                     "correct": "Y" if correct else ("N" if correct is False else ""),

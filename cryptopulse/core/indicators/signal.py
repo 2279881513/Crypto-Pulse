@@ -51,12 +51,12 @@ def generate_signal(
     # 选取主周期和辅助周期
     if style == "short_term":
         main_interval, aux_interval = "1m", "5m"
-        atr_multiplier_sl = 1.5
-        atr_multiplier_tp = (2.0, 3.5, 5.0)
+        atr_multiplier_sl = 1.2
+        atr_multiplier_tp = (1.3, 2.2, 3.5)
     else:
         main_interval, aux_interval = "4H", "1D"
-        atr_multiplier_sl = 2.0
-        atr_multiplier_tp = (3.0, 6.0, 10.0)
+        atr_multiplier_sl = 1.5
+        atr_multiplier_tp = (2.0, 4.0, 7.0)
 
     # 计算指标
     main_df = kline_data.get(main_interval, pd.DataFrame())

@@ -100,15 +100,17 @@ class TechnicalSignalEngine:
         # ---------------------------------------------------------------
         signals = {}
         weights = {
-            "ema": 0.20,
-            "macd": 0.12,
-            "rsi": 0.10,
-            "bollinger": 0.10,
-            "volume": 0.08,
-            "obv": 0.08,
-            "adx_filter": 0.10,
-            "momentum": 0.12,
-            "micro": 0.10,
+            "ema": 0.12,        # 降低权重，1m上滞后明显
+            "macd": 0.06,
+            "rsi": 0.14,        # 增加均值回归权重
+            "bollinger": 0.14,   # 增加布林带权重
+            "volume": 0.04,
+            "obv": 0.04,
+            "adx_filter": 0.08,  # 降低，它是元信号不是方向信号
+            "momentum": 0.06,     # 降低，1m上噪音大
+            "micro": 0.06,
+            "pullback": 0.14,    # 趋势回调入场
+            "reversion": 0.12,   # RSI+BB极端反转
         }
 
         # --- EMA 排列评分 ---
@@ -127,6 +129,26 @@ class TechnicalSignalEngine:
                 signals["ema"] = 0.0
         else:
             signals["ema"] = 0.0
+
+        # --- 趋势回调入场评分 (pullback) ---
+        # 强趋势中价格回踩EMA→趋势延续信号；价格远离EMA→超买/超卖预警
+        if adx_latest >= 30 and not np.isnan(ema_f[-1]) and not np.isnan(atr_val[-1]):
+            dist_to_ema = abs(price - ema_f[-1])
+            ema_dist_ratio = dist_to_ema / (atr_val[-1] + 1e-10)
+            ema_bull = ema_f[-1] > ema_m[-1] > ema_s[-1]
+            ema_bear = ema_f[-1] < ema_m[-1] < ema_s[-1]
+            if ema_bull and price >= ema_f[-1] - atr_val[-1] * 0.3 and price <= ema_f[-1] + atr_val[-1] * 0.3:
+                signals["pullback"] = 1.0  # 多头趋势中回踩EMA，理想入场
+            elif ema_bear and price <= ema_f[-1] + atr_val[-1] * 0.3 and price >= ema_f[-1] - atr_val[-1] * 0.3:
+                signals["pullback"] = -1.0  # 空头趋势中反弹EMA，理想入场
+            elif ema_bull and ema_dist_ratio > 2.0:
+                signals["pullback"] = -0.5  # 多头趋势中价格远离EMA→超买回调风险
+            elif ema_bear and ema_dist_ratio > 2.0:
+                signals["pullback"] = 0.5   # 空头趋势中价格远离EMA→超卖反弹机会
+            else:
+                signals["pullback"] = 0.0
+        else:
+            signals["pullback"] = 0.0
 
         # --- MACD 评分 ---
         if not np.isnan(macd_hist[-1]) and not np.isnan(macd_hist[-2]):
@@ -181,6 +203,24 @@ class TechnicalSignalEngine:
                 signals["bollinger"] = 0.7  # 突破下轨 → 超卖
         else:
             signals["bollinger"] = 0.0
+
+        # --- RSI+BB 极端反转评分 (reversion) ---
+        if not np.isnan(rsi_val[-1]) and not np.isnan(bb_upper[-1]):
+            r = rsi_val[-1]
+            at_bb_lower = price <= bb_lower[-1] + (bb_mid[-1] - bb_lower[-1]) * 0.1
+            at_bb_upper = price >= bb_upper[-1] - (bb_upper[-1] - bb_mid[-1]) * 0.1
+            if r < 30 and at_bb_lower:
+                signals["reversion"] = 1.0   # 强烈超卖+突破下轨→做多
+            elif r > 70 and at_bb_upper:
+                signals["reversion"] = -1.0  # 强烈超买+突破上轨→做空
+            elif r < 35 and price < bb_mid[-1]:
+                signals["reversion"] = 0.6   # 偏超卖+中下轨→偏向做多
+            elif r > 65 and price > bb_mid[-1]:
+                signals["reversion"] = -0.6  # 偏超买+中上轨→偏向做空
+            else:
+                signals["reversion"] = 0.0
+        else:
+            signals["reversion"] = 0.0
 
         # --- 成交量评分 ---
         if vol_ratio > 1.5:
@@ -261,33 +301,45 @@ class TechnicalSignalEngine:
         total_score = total * 100  # 映射到 -100 ~ +100
         total_score = max(-100, min(100, total_score))
 
-        # 方向判定
-        threshold = 40
-        if total_score > threshold:
+        # ---- 方向判定: 根据 ADX 分模式动态阈值 ----
+        # ADX>=35 强趋势→25分即可进场跟随趋势
+        # ADX 25-34 有趋势→35分正常要求
+        # ADX<25 弱趋势/震荡→45分过滤噪音
+        if adx_latest >= 35:
+            effective_threshold = 25
+        elif adx_latest >= 25:
+            effective_threshold = 35
+        else:
+            effective_threshold = 45
+
+        if total_score > effective_threshold:
             direction = Direction.BULLISH
-        elif total_score < -threshold:
+        elif total_score < -effective_threshold:
             direction = Direction.BEARISH
         else:
             direction = Direction.NEUTRAL
 
         # ---- ADX 弱趋势过滤: 无趋势+中等信号→放弃 ----
-        if adx_latest < 25 and abs(total_score) < 50:
+        if adx_latest < 25 and abs(total_score) < effective_threshold + 5:
             direction = Direction.NEUTRAL
 
-        # ---- EMA 方向做软过滤(非硬过滤) ----
+        # ---- EMA 方向倾向过滤(仅强趋势时启用) ----
+        # 弱趋势/震荡市中不过滤，避免压制空头信号
         ema_bullish = not any(np.isnan(x) for x in (ema_f[-1], ema_m[-1], ema_s[-1])) and ema_f[-1] > ema_m[-1] > ema_s[-1]
         ema_bearish = not any(np.isnan(x) for x in (ema_f[-1], ema_m[-1], ema_s[-1])) and ema_f[-1] < ema_m[-1] < ema_s[-1]
-        if ema_bullish and direction == Direction.BEARISH:
-            if abs(total_score) < 40:
-                direction = Direction.NEUTRAL  # 上升趋势不做空(除非信号极强)
-        elif ema_bearish and direction == Direction.BULLISH:
-            if abs(total_score) < 40:
-                direction = Direction.NEUTRAL  # 下降趋势不做多(除非信号极强)
+        if adx_latest >= 30:
+            # 强趋势中才做方向一致性过滤
+            if ema_bullish and direction == Direction.BEARISH:
+                if abs(total_score) < 55:
+                    direction = Direction.NEUTRAL
+            elif ema_bearish and direction == Direction.BULLISH:
+                if abs(total_score) < 55:
+                    direction = Direction.NEUTRAL
 
         # 信心度
         adx_bonus = 1.15 if adx_latest >= 35 else (1.05 if adx_latest >= 25 else 0.9)
         confidence = min(100, max(10, int(abs(total_score) * 0.9 * adx_bonus)))
-        if direction != Direction.NEUTRAL and confidence < 35:
+        if direction != Direction.NEUTRAL and confidence < 25:
             direction = Direction.NEUTRAL
 
         # ---------------------------------------------------------------
@@ -318,36 +370,36 @@ class TechnicalSignalEngine:
             entry_low = price - current_atr * 0.3
             entry_high = price + current_atr * 0.3
             entry_opt = price
-            # 止损：放在最近支撑下方一点，或者 ATR 止损
+            # 止损：放在最近支撑下方一点，或者 ATR 止损（收紧）
             if nearest_support:
-                stop = min(nearest_support - current_atr * 0.3, price - current_atr * 1.5)
+                stop = min(nearest_support - current_atr * 0.2, price - current_atr * 1.2)
             else:
-                stop = price - current_atr * 1.5
-            # 止盈：放在最近阻力附近，或 ATR 目标
+                stop = price - current_atr * 1.2
+            # 止盈：放在最近阻力附近，或 ATR 目标（收紧，减少超时）
             if nearest_resistance:
-                tp1 = min(nearest_resistance - current_atr * 0.2, price + current_atr * 2.0)
-                tp2 = min(nearest_resistance + current_atr * 0.5, price + current_atr * 3.5)
-                tp3 = nearest_resistance + current_atr * 1.5
+                tp1 = min(nearest_resistance - current_atr * 0.2, price + current_atr * 1.3)
+                tp2 = min(nearest_resistance + current_atr * 0.3, price + current_atr * 2.2)
+                tp3 = nearest_resistance + current_atr * 1.0
             else:
-                tp1 = price + current_atr * 1.5
-                tp2 = price + current_atr * 3.0
-                tp3 = price + current_atr * 5.0
+                tp1 = price + current_atr * 1.3
+                tp2 = price + current_atr * 2.2
+                tp3 = price + current_atr * 3.5
         elif direction == Direction.BEARISH:
             entry_low = price - current_atr * 0.3
             entry_high = price + current_atr * 0.3
             entry_opt = price
             if nearest_resistance:
-                stop = max(nearest_resistance + current_atr * 0.3, price + current_atr * 1.5)
+                stop = max(nearest_resistance + current_atr * 0.2, price + current_atr * 1.2)
             else:
-                stop = price + current_atr * 1.5
+                stop = price + current_atr * 1.2
             if nearest_support:
-                tp1 = max(nearest_support + current_atr * 0.2, price - current_atr * 2.0)
-                tp2 = max(nearest_support - current_atr * 0.5, price - current_atr * 3.5)
-                tp3 = nearest_support - current_atr * 1.5
+                tp1 = max(nearest_support + current_atr * 0.2, price - current_atr * 1.3)
+                tp2 = max(nearest_support - current_atr * 0.3, price - current_atr * 2.2)
+                tp3 = nearest_support - current_atr * 1.0
             else:
-                tp1 = price - current_atr * 1.5
-                tp2 = price - current_atr * 3.0
-                tp3 = price - current_atr * 5.0
+                tp1 = price - current_atr * 1.3
+                tp2 = price - current_atr * 2.2
+                tp3 = price - current_atr * 3.5
         else:
             entry_low = price * 0.99
             entry_high = price * 1.01

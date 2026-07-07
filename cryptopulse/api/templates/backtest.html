@@ -849,12 +849,14 @@ function renderTable(){
     const ft=getFilteredTrades(trades);
     if(!ft.length){document.getElementById('table-wrap').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
     const sorted=[...ft].reverse();
-    let html='<table><thead><tr><th style="width:24px">#</th><th style="width:75px">时间</th><th>方向</th><th>评分</th><th>入场价</th><th>出场价</th><th>PnL%</th><th>结果</th><th>原因</th></tr></thead><tbody>';
+    let html='<table><thead><tr><th style="width:24px">#</th><th style="width:75px">时间</th><th>方向</th><th>评分</th><th>入场价</th><th style="color:#e74c3c">止损</th><th style="color:#2ecc71">止盈</th><th>出场价</th><th>PnL%</th><th>结果</th><th>原因</th></tr></thead><tbody>';
     sorted.forEach((t,i)=>{
         const dirCls=t.direction==='bullish'?'td-up':'td-down',dirTxt=t.direction==='bullish'?'📈 多':'📉 空';
         const pnlCls=t.pnl_pct>=0?'td-pnl-pos':'td-pnl-neg',pnlTxt=(t.pnl_pct>=0?'+':'')+t.pnl_pct+'%';
         const resCls=t.correct?'td-ok':'td-fail',resTxt=t.correct?'✅':'❌';
-        html+='<tr onclick="jumpToTrade('+t.timestamp+')" style="cursor:pointer"><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+Math.abs(t.score)+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td><td style="font-size:9px;color:#525f7a;white-space:nowrap">'+(t.exit_reason||'')+'</td></tr>';
+        const slTxt=t.sl_price?t.sl_price.toFixed(1):'--';
+        const tpTxt=t.tp_price?t.tp_price.toFixed(1):'--';
+        html+='<tr onclick="jumpToTrade('+t.timestamp+')" style="cursor:pointer"><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+Math.abs(t.score)+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price" style="color:#e74c3c">'+slTxt+'</td><td class="td-price" style="color:#2ecc71">'+tpTxt+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td><td style="font-size:9px;color:#525f7a;white-space:nowrap">'+(t.exit_reason||'')+'</td></tr>';
     });
     document.getElementById('table-wrap').innerHTML=html+'</tbody></table>';
 }
