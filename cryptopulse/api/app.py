@@ -537,6 +537,7 @@ def api_backtest():
         trade_start_ms = request.args.get("trade_start", 0, type=int)
         # 导出模式：跳过K线数据生成，只返回交易数据
         csv_export = request.args.get("format") == "csv"
+        raw_export = request.args.get("raw") == "1"
 
         # 时间范围：支持 start/end (Unix ms 或 ISO 日期)
         now_ms = int(time.time() * 1000)
@@ -649,6 +650,7 @@ def api_backtest():
 
         candles_out = []
         signals_raw = []
+        all_signals = []  # 所有信号（含观望）
         for i in range(len(df)):
             signal = _compute_signal(i, close, high, low, openp, vol,
                     all_ema_f, all_ema_m, all_ema_s, all_macd_hist, all_rsi,
@@ -656,15 +658,34 @@ def api_backtest():
                     all_ema_f5, all_ema_m5, all_ema_s5,
                     all_adx5, all_rsi5, all_macd_h5, c5, idx_5m_map)
             ts = int(df["timestamp"].iloc[i])
-            if signal and signal["direction"] != "neutral":
-                if trade_start_ms <= 0 or ts >= trade_start_ms:
-                    signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
+            if signal:
+                all_signals.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
+                if signal["direction"] != "neutral":
+                    if trade_start_ms <= 0 or ts >= trade_start_ms:
+                        signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
             if not csv_export:
                 candles_out.append({
                     "t": ts,
                     "o": openp[i], "h": high[i], "l": low[i], "c": close[i],
                     "v": vol[i], "s": signal,
                 })
+        # ---- 原始K线导出 ----
+        if raw_export:
+            import io
+            buf = io.StringIO()
+            buf.write("timestamp,open,high,low,close,volume,direction,score,confidence,reason\n")
+            for i in range(len(df)):
+                ts = df["timestamp"].iloc[i]
+                sig = _compute_signal(i, close, high, low, openp, vol,
+                    all_ema_f, all_ema_m, all_ema_s, all_macd_hist, all_rsi,
+                    all_bb_upper, all_bb_mid, all_bb_lower, all_adx, all_obv, all_vol_ma20,
+                    all_ema_f5, all_ema_m5, all_ema_s5,
+                    all_adx5, all_rsi5, all_macd_h5, c5, idx_5m_map)
+                if sig:
+                    dir_v = sig["direction"]
+                    buf.write(f"{ts},{openp[i]},{high[i]},{low[i]},{close[i]},{vol[i]},{dir_v},{sig['score']},{sig['confidence']},{sig['reason']}\n")
+            return Response(buf.getvalue(), mimetype="text/csv;charset=utf-8-sig", headers={"Content-Disposition": f"attachment; filename=klines_{style}.csv"})
+
         trades = []
         for sr in signals_raw:
             idx = sr["idx"]
@@ -810,93 +831,102 @@ def api_backtest():
                 }
                 break
 
-        # ---- CSV导出（format=csv模式） ----
+        # ---- CSV导出（format=csv模式：所有信号明细） ----
         if csv_export:
-            if not trades:
-                return jsonify({"error": "没有交易数据"}), 404
-            # 丰富详细字段
-            sig_by_ts = {sr["ts"]: sr["sig"] for sr in signals_raw}
-            for t in trades:
-                sig = sig_by_ts.get(t["timestamp"])
-                s = sig.get("signals", {}) if sig else {}
-                idx = None
-                for sr in signals_raw:
-                    if sr["ts"] == t["timestamp"]:
-                        idx = sr["idx"]; break
-                if idx is not None:
-                    p = close[idx]
-                    atr_v = all_atr[idx]
-                    t["max_favorable_pct"] = 0
-                    t["max_adverse_pct"] = 0
-                    t["sl_dist_pct"] = round(sl_pct, 2)
-                    t["tp_dist_pct"] = round(tp_pct, 2)
-                    t["signal_reason"] = sig["reason"]
-                    t["trade_duration"] = lookahead
-                    t["entry_atr_pct"] = round(atr_v / p * 100, 2) if not np.isnan(atr_v) else 0
-                    t["price_trend"] = "up" if p > openp[idx] else "down"
-                    t["entry_bar_dir"] = t["price_trend"]
-                    t["hour_of_day"] = time.localtime(t["timestamp"] / 1000).tm_hour
-                    adx_v = all_adx[idx] if not np.isnan(all_adx[idx]) else 20
-                    t["adx_category"] = "强趋势" if adx_v >= 35 else ("中趋势" if adx_v >= 25 else ("弱趋势" if adx_v >= 20 else "无趋势"))
-                    t["fee_cost"] = round(fee_rate * 2 * 100, 3)
-                    t["net_pnl_pct"] = round(t["pnl_pct"] - t["fee_cost"], 4)
-                    t["ema"] = round(s.get("ema", 0), 2)
-                    t["momentum"] = round(s.get("momentum", 0), 2)
-                    t["macd"] = round(s.get("macd", 0), 2)
-                    t["rsi_val"] = round(sig.get("rsi_val", 50), 1)
-                    t["rsi_score"] = round(s.get("rsi", 0), 2)
-                    t["bb"] = round(s.get("bollinger", 0), 2)
-                    vr = vol[idx] / all_vol_ma20[idx] if all_vol_ma20[idx] > 0 else 1
-                    t["vol_ratio"] = round(vr, 2)
-                    t["vol_score"] = round(s.get("volume", 0), 2)
-                    t["obv_score"] = round(s.get("obv", 0), 2)
-                    t["micro"] = round(s.get("micro", 0), 2)
-                    t["adx"] = round(adx_v, 1)
-                    t["atr"] = round(atr_v, 2) if not np.isnan(atr_v) else 0
-            if fee_filter:
-                mn = fee_rate * 2 * 100
-                trades = [r for r in trades if abs(r["pnl_pct"]) >= mn]
-            if not trades:
-                return jsonify({"error": "过滤后无交易数据"}), 404
-            # 序号放第一列，重新排序
-            ordered = []
-            first_cols = ["#","time","price","exit_price","sl_price","tp_price","direction","total_score","confidence","correct","pnl_pct","exit_reason","max_favorable_pct","max_adverse_pct","sl_dist_pct","tp_dist_pct","signal_reason","trade_duration","entry_atr_pct","price_trend","entry_bar_dir","hour_of_day","adx_category","fee_cost","net_pnl_pct","ema","momentum","macd","rsi_val","rsi_score","bb","vol_ratio","vol_score","obv_score","micro","adx","atr","lookahead"]
-            # 加 price 别名
-            for t in trades:
-                t["price"] = t.get("entry_price", 0)
-                t["total_score"] = t.get("score", 0)
-                t["correct"] = "Y" if t.get("correct") else "N"
-            for n, r in enumerate(trades, 1):
-                r["#"] = n
+            if not all_signals:
+                return jsonify({"error": "没有信号数据"}), 404
+            sig_rows = []
+            for n, sr in enumerate(all_signals, 1):
+                idx = sr["idx"]
+                sig = sr["sig"]
+                s = sig.get("signals", {}) or {}
+                p = close[idx]
+                atr_v = all_atr[idx] if not np.isnan(all_atr[idx]) else 0
+                adx_v = all_adx[idx] if not np.isnan(all_adx[idx]) else 20
+                vr = vol[idx] / all_vol_ma20[idx] if all_vol_ma20[idx] > 0 else 1
+                hr = time.localtime(sr["ts"] / 1000).tm_hour
+                is_dir = sig["direction"] != "neutral"
+                # SL/TP验证
+                entry_price = p
+                sl_price = entry_price * (1 - sl_pct / 100) if sl_pct > 0 else None
+                tp_price = entry_price * (1 + tp_pct / 100) if tp_pct > 0 else None
+                correct = None; exit_price = None; exit_reason = ""; pnl_pct = None
+                if is_dir:
+                    is_bull = sig["direction"] == "bullish"
+                    future_end = min(idx + lookahead, len(df) - 1)
+                    exit_price = close[future_end]
+                    correct = False; exit_reason = "时间到"
+                    for j in range(idx + 1, future_end + 1):
+                        bh, bl = high[j], low[j]
+                        if is_bull:
+                            if tp_pct > 0 and bh >= tp_price: exit_price = tp_price; correct = True; exit_reason = "止盈"; break
+                            if sl_pct > 0 and bl <= sl_price: exit_price = sl_price; correct = False; exit_reason = "止损"; break
+                        else:
+                            tp_alt = entry_price * (1 - tp_pct / 100) if tp_pct > 0 else None
+                            sl_alt = entry_price * (1 + sl_pct / 100) if sl_pct > 0 else None
+                            if tp_pct > 0 and bl <= tp_alt: exit_price = tp_alt; correct = True; exit_reason = "止盈"; break
+                            if sl_pct > 0 and bh >= sl_alt: exit_price = sl_alt; correct = False; exit_reason = "止损"; break
+                    pnl_pct = round((exit_price / entry_price - 1) * (1 if is_bull else -1) * 100, 4)
+                fee_cost = round(fee_rate * 2 * 100, 3)
+                fee_triggered = is_dir and abs(pnl_pct or 0) < fee_cost
+                row = {
+                    "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(sr["ts"] / 1000)),
+                    "price": round(p, 1),
+                    "open": round(openp[idx], 1),
+                    "high": round(high[idx], 1),
+                    "low": round(low[idx], 1),
+                    "volume": round(vol[idx], 4),
+                    "direction": sig["direction"],
+                    "score": sig["score"],
+                    "confidence": sig["confidence"],
+                    "reason": sig["reason"],
+                    "entry_price": round(entry_price, 1) if is_dir else "",
+                    "sl_price": round(sl_price, 1) if is_dir and sl_price else "",
+                    "tp_price": round(tp_price, 1) if is_dir and tp_price else "",
+                    "exit_price": round(exit_price, 1) if exit_price else "",
+                    "exit_reason": exit_reason,
+                    "correct": "Y" if correct else ("N" if correct is False else ""),
+                    "pnl_pct": pnl_pct,
+                    "保本": "未触发" if fee_triggered else "",
+                    "#": n,
+                    "ema": round(s.get("ema", 0), 2),
+                    "momentum": round(s.get("momentum", 0), 2),
+                    "macd": round(s.get("macd", 0), 2),
+                    "rsi_val": round(sig.get("rsi_val", 50), 1),
+                    "rsi_score": round(s.get("rsi", 0), 2),
+                    "bb": round(s.get("bollinger", 0), 2),
+                    "vol_ratio": round(vr, 2),
+                    "vol_score": round(s.get("volume", 0), 2),
+                    "obv_score": round(s.get("obv", 0), 2),
+                    "micro": round(s.get("micro", 0), 2),
+                    "adx": round(adx_v, 1),
+                    "atr": round(atr_v, 2),
+                    "adx_category": "强趋势" if adx_v >= 35 else ("中趋势" if adx_v >= 25 else ("弱趋势" if adx_v >= 20 else "无趋势")),
+                    "price_trend": "up" if p > openp[idx] else "down",
+                    "hour_of_day": hr,
+                }
+                sig_rows.append(row)
+            # 统计
+            total_s = len(sig_rows)
+            bullish = sum(1 for r in sig_rows if r["direction"] == "bullish")
+            bearish = sum(1 for r in sig_rows if r["direction"] == "bearish")
+            neutral_s = sum(1 for r in sig_rows if r["direction"] == "neutral")
             import io as _io
             b = _io.StringIO()
-            b.write("【回测结果汇总】\n")
-            if fee_filter: b.write(f"(已开启保本过滤, 阈值 {round(fee_rate*2*100,3)}%)\n")
-            total_t = len(trades)
-            c_n = sum(1 for r in trades if r["correct"] == "Y")
-            tp_t = sum(r["pnl_pct"] for r in trades)
-            ws = [r for r in trades if r["pnl_pct"] > 0]
-            ls = [r for r in trades if r["pnl_pct"] <= 0]
-            ft = round(total_t * fee_rate * 2 * 100, 2)
-            nt = round(tp_t - ft, 2)
-            b.write(f"交易笔数,{total_t}\n正确,{c_n} ({round(c_n/total_t*100,1)}%)\n错误,{total_t-c_n} ({round((total_t-c_n)/total_t*100,1)}%)\n")
-            b.write(f"准确率,{round(c_n/total_t*100,1)}%\n总毛利,{round(tp_t,2)}%\n总手续费,{ft}%\n净利,{nt}%\n")
-            b.write(f"胜率,{round(len(ws)/total_t*100,1)}%\n")
-            pf2 = round(abs(sum(r['pnl_pct'] for r in ws)/max(abs(sum(r['pnl_pct'] for r in ls)),1e-10)),2) if ls else 0
-            b.write(f"盈亏比,{pf2}\n")
-            b.write(f"平均盈,{round(sum(r['pnl_pct'] for r in ws)/len(ws),2) if ws else 0}%\n平均亏,{round(sum(r['pnl_pct'] for r in ls)/len(ls),2) if ls else 0}%\n")
-            sc = sum(1 for r in trades if r["exit_reason"] == "止损")
-            tc2 = sum(1 for r in trades if r["exit_reason"] == "止盈")
-            imc = sum(1 for r in trades if r["exit_reason"] == "时间到")
-            b.write(f"止损,{sc}笔({round(sc/total_t*100,1)}%)\n止盈,{tc2}笔({round(tc2/total_t*100,1)}%)\n时间到,{imc}笔({round(imc/total_t*100,1)}%)\n")
-            b.write(f"\n【仓位参数】\n本金,{cap} USDT\n杠杆,{int(lev)}x\n费率,{round(fee_rate*100,2)}%\n每笔手续费,{round(fee_rate*2*100,3)}%\n总手续费金额,{round(ft*cap*lev/100,1)} USDT\n")
-            b.write("\n【每笔交易明细】\n")
-            # 用有序列写
-            csv_df = pd.DataFrame(trades)
-            avail_cols = [c for c in first_cols if c in csv_df.columns]
-            csv_df[avail_cols].to_csv(b, index=False)
+            b.write("【信号明细汇总】\n")
+            b.write(f"总信号数,{total_s}\n做多,{bullish}\n做空,{bearish}\n观望,{neutral_s}\n")
+            b.write(f"做多占比,{round(bullish/total_s*100,1)}%\n做空占比,{round(bearish/total_s*100,1)}%\n观望占比,{round(neutral_s/total_s*100,1)}%\n")
+            b.write(f"\n【仓位参数】\n本金,{cap} USDT\n杠杆,{int(lev)}x\n费率,{round(fee_rate*100,2)}%\n")
+            b.write("\n【信号明细】\n")
+            cols = ["#","time","price","open","high","low","volume","direction","score","confidence","reason",
+                    "entry_price","sl_price","tp_price","exit_price","exit_reason","correct","pnl_pct","保本",
+                    "ema","momentum","macd","rsi_val","rsi_score","bb","vol_ratio","vol_score",
+                    "obv_score","micro","adx","atr","adx_category","price_trend","hour_of_day"]
+            avail = [c for c in cols if c in sig_rows[0]]
+            csv_df = pd.DataFrame(sig_rows)
+            csv_df[avail].to_csv(b, index=False)
             ts_str = time.strftime("%Y%m%d_%H%M%S")
-            return Response(b.getvalue(), mimetype="text/csv;charset=utf-8-sig", headers={"Content-Disposition": f"attachment; filename=backtest_{style}_{ts_str}.csv"})
+            return Response(b.getvalue(), mimetype="text/csv;charset=utf-8-sig", headers={"Content-Disposition": f"attachment; filename=signals_{style}_{ts_str}.csv"})
 
         return jsonify({
             "symbol": symbol,
