@@ -102,6 +102,8 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
         <span>到</span>
         <input type="datetime-local" id="sel-end" style="width:130px">
         <button class="btn-s" id="btn-latest" onclick="toggleLatest()" style="background:#1e2a45;color:#8892b0">📡 到最新</button>
+        <button class="btn-s" onclick="setRange(1)">1天</button>
+        <button class="btn-s" onclick="setRange(3)">3天</button>
         <button class="btn-s" onclick="setRange(7)">7天</button>
         <button class="btn-s" onclick="setRange(30)">30天</button>
         <button class="btn-s" onclick="setRange(90)">90天</button>
@@ -297,7 +299,8 @@ function initChart() {
             +'<div class="tip-row"><span class="tip-l">评分</span><span class="tip-v">'+Math.abs(c.s.score)+' / '+c.s.confidence+'%</span></div>'
             +(c.s.reason?'<div class="tip-row"><span class="tip-l">原因</span><span class="tip-v" style="color:#8892b0;font-size:10px">'+c.s.reason+'</span></div>':'')}
         if(t){var dp=t.direction==='bullish';var pnl$=t.pnl_pct*Number(document.getElementById('pos-capital').value||1000)*Number(document.getElementById('pos-leverage').value||1)/100;
-        var a=[];a.push('<div class="tip-row"><span class="tip-l">方向</span><span class="tip-v" style="color:'+(dp?'#2ecc71':'#e74c3c')+'">'+(dp?'📈 多':'📉 空')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">入场</span><span class="tip-v">'+t.entry_price+'</span></div>');if(t.sl_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#e74c3c">止损</span><span class="tip-v" style="color:#e74c3c">'+t.sl_price+' ('+_fPct(t.sl_price,t.entry_price)+')</span></div>')}if(t.tp_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#2ecc71">止盈</span><span class="tip-v" style="color:#2ecc71">'+t.tp_price+' ('+_fPct(t.tp_price,t.entry_price)+')</span></div>')}a.push('<div class="tip-row"><span class="tip-l">出场</span><span class="tip-v">'+t.exit_price+'</span></div>');var e=t.exit_reason||'';var ic=e==='止盈'?'🎯':e==='止损'?'🛑':e==='时间到'?'⏱️':'';a.push('<div class="tip-row"><span class="tip-l">离场</span><span class="tip-v" style="font-size:10px;color:#8892b0">'+ic+e+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">结果</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">盈亏</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'% $'+(pnl$>=0?'+':'')+pnl$.toFixed(2)+'</span></div>');html+=a.join('')}
+        var isFeeFiltered=document.getElementById('chk-fee-filter').checked && !getFilteredTrades(trades).some(tr=>tr.timestamp===c.t);
+        var a=[];a.push('<div class="tip-row"><span class="tip-l">方向</span><span class="tip-v" style="color:'+(dp?'#2ecc71':'#e74c3c')+'">'+(dp?'📈 多':'📉 空')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">入场</span><span class="tip-v">'+t.entry_price+'</span></div>');if(t.sl_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#e74c3c">止损</span><span class="tip-v" style="color:#e74c3c">'+t.sl_price+' ('+_fPct(t.sl_price,t.entry_price)+')</span></div>')}if(t.tp_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#2ecc71">止盈</span><span class="tip-v" style="color:#2ecc71">'+t.tp_price+' ('+_fPct(t.tp_price,t.entry_price)+')</span></div>')}a.push('<div class="tip-row"><span class="tip-l">出场</span><span class="tip-v">'+t.exit_price+'</span></div>');var e=t.exit_reason||'';var ic=e==='止盈'?'🎯':e==='止损'?'🛑':e==='时间到'?'⏱️':'';a.push('<div class="tip-row"><span class="tip-l">离场</span><span class="tip-v" style="font-size:10px;color:#8892b0">'+ic+e+'</span></div>');if(isFeeFiltered){a.push('<div class="tip-row"><span class="tip-l">保本</span><span class="tip-v" style="font-size:10px;color:#525f7a">未触发</span></div>')}a.push('<div class="tip-row"><span class="tip-l">结果</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">盈亏</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'% $'+(pnl$>=0?'+':'')+pnl$.toFixed(2)+'</span></div>');html+=a.join('')}
         tip.innerHTML=html;
         const x=param.point.x,y=param.point.y,wr=document.getElementById('chart-wrap').getBoundingClientRect();
         tip.style.left=(x+15>wr.right?x-160:x+15)+'px';tip.style.top=(y-10<wr.top?y+20:y-10)+'px';tip.style.display='block'
@@ -675,7 +678,9 @@ function renderChart(keepZoom){
     candleSeries.setData(cdlData);
     volumeSeries.setData(candles.map(c=>({time:Math.floor(c.t/1000),value:c.v,color:c.c>=c.o?'rgba(46,204,113,0.25)':'rgba(231,76,60,0.25)'})));
     const markers=[],tradeMap={},signalColors={};
-    trades.forEach(t=>tradeMap[t.timestamp]=t);
+    const markersTrades=getFilteredTrades(trades);
+    markersTrades.forEach(t=>tradeMap[t.timestamp]=t);
+    const feeFilterOn=document.getElementById('chk-fee-filter').checked;
     candles.forEach(c=>{
         if(!c.s||c.s.direction==='neutral')return;
         const t=Math.floor(c.t/1000);
@@ -703,15 +708,13 @@ function renderChart(keepZoom){
                 size:highlightFilter?2.0:1.5,
             });
         }else{
-            // 只有信号没有交易（可能是预测后来被过滤了）
-            markers.push({
-                time:t,
-                position:'inBar',
-                color:'#525f7a',
-                shape:'diamond',
-                text:'',
-                size:0.6,
-            });
+            const filteredOut = feeFilterOn && trades.some(tr2 => tr2.timestamp === c.t);
+            if(filteredOut){
+                const dir=c.s.direction==='bullish';
+                markers.push({time:t,position:dir?'belowBar':'aboveBar',color:'#525f7a',shape:dir?'arrowUp':'arrowDown',text:'',size:1.2});
+            }else{
+                markers.push({time:t,position:'inBar',color:'#525f7a',shape:'diamond',text:'',size:0.6});
+            }
         }
     });
     candleSeries.setMarkers(markers);
