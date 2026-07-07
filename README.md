@@ -135,3 +135,9 @@ python run_web.py
 本软件的回测结果仅为历史数据统计，不构成任何投资建议。加密货币交易存在高风险，使用本软件所产生的一切后果由使用者自行承担。
 
 详细条款请查看 [LICENSE](./LICENSE) 文件。
+
+---
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=2279881513/Crypto-Pulse&type=Date)](https://star-history.com/#2279881513/Crypto-Pulse&Date)
