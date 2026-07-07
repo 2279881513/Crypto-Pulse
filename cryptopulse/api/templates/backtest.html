@@ -207,12 +207,14 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
         <span class="panel-tab" data-tab="dist" onclick="switchTab('dist')">📊 PnL分布</span>
         <span class="panel-tab" data-tab="pos" onclick="switchTab('pos')">💰 盈亏</span>
         <span class="panel-tab" data-tab="score" onclick="switchTab('score')">📊 评分</span>
+        <span class="panel-tab" data-tab="signal" onclick="switchTab('signal')">📶 信号明细</span>
     </div>
     <div id="panel-content">
-        <div id="table-wrap"></div>
+        <div id="table-wrap" style="height:100%;overflow-y:auto"></div>
         <div id="dist-chart"></div>
         <div id="pos-panel" style="display:none;height:100%;overflow-y:auto;padding:12px 14px"></div>
         <div id="score-panel" style="display:none;height:100%;overflow-y:auto;padding:12px 14px"></div>
+        <div id="signal-panel" style="display:none;height:100%;overflow-y:auto;padding:6px"></div>
     </div>
 </div>
 <div id="tip"></div>
@@ -231,7 +233,7 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
 
 <script>
 let chart, candleSeries, volumeSeries, predSeries, histPredSeries;
-let candles = [], trades = [], stats = null;
+let candles = [], trades = [], stats = null, allSignals = [];
 let currentStyle = 'short_term';
 let loadReqId = 0;
 let showHistPred = false;
@@ -291,6 +293,7 @@ function initChart() {
             if(t.sl_price)plineRefs.push(candleSeries.createPriceLine({price:t.sl_price,color:'#e74c3c',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'止损'}));
             if(t.tp_price)plineRefs.push(candleSeries.createPriceLine({price:t.tp_price,color:'#2ecc71',lineWidth:1,lineStyle:2,axisLabelVisible:true,title:'止盈'}));
             if(t.entry_price)plineRefs.push(candleSeries.createPriceLine({price:t.entry_price,color:'#f1c40f',lineWidth:1,lineStyle:0,axisLabelVisible:true,title:'入场'}));
+
         }
         const ts=param.time*1000;
         let html='<div class="tip-row"><span class="tip-l">时间</span><span class="tip-v">'+new Date(ts).toISOString().slice(0,16).replace('T',' ')+'</span></div>'
@@ -301,7 +304,7 @@ function initChart() {
             +(c.s.reason?'<div class="tip-row"><span class="tip-l">原因</span><span class="tip-v" style="color:#8892b0;font-size:10px">'+c.s.reason+'</span></div>':'')}
         if(t){var dp=t.direction==='bullish';var pnl$=t.pnl_pct*Number(document.getElementById('pos-capital').value||1000)*Number(document.getElementById('pos-leverage').value||1)/100;
         var isFeeFiltered=document.getElementById('chk-fee-filter').checked && !getFilteredTrades(trades).some(tr=>tr.timestamp===c.t);
-        var a=[];a.push('<div class="tip-row"><span class="tip-l">方向</span><span class="tip-v" style="color:'+(dp?'#2ecc71':'#e74c3c')+'">'+(dp?'📈 多':'📉 空')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">入场</span><span class="tip-v">'+t.entry_price+'</span></div>');if(t.sl_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#e74c3c">止损</span><span class="tip-v" style="color:#e74c3c">'+t.sl_price+' ('+_fPct(t.sl_price,t.entry_price)+')</span></div>')}if(t.tp_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#2ecc71">止盈</span><span class="tip-v" style="color:#2ecc71">'+t.tp_price+' ('+_fPct(t.tp_price,t.entry_price)+')</span></div>')}a.push('<div class="tip-row"><span class="tip-l">出场</span><span class="tip-v">'+t.exit_price+'</span></div>');var e=t.exit_reason||'';var ic=e==='止盈'?'🎯':e==='止损'?'🛑':e==='时间到'?'⏱️':'';a.push('<div class="tip-row"><span class="tip-l">离场</span><span class="tip-v" style="font-size:10px;color:#8892b0">'+ic+e+'</span></div>');if(isFeeFiltered){a.push('<div class="tip-row"><span class="tip-l">保本</span><span class="tip-v" style="font-size:10px;color:#525f7a">未触发</span></div>')}a.push('<div class="tip-row"><span class="tip-l">结果</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">盈亏</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'% $'+(pnl$>=0?'+':'')+pnl$.toFixed(2)+'</span></div>');html+=a.join('')}
+        var a=[];a.push('<div class="tip-row"><span class="tip-l">方向</span><span class="tip-v" style="color:'+(dp?'#2ecc71':'#e74c3c')+'">'+(dp?'📈 多':'📉 空')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">入场</span><span class="tip-v">'+t.entry_price+'</span></div>');if(t.sl_price){a.push('<div class="tip-row"><span class="tip-l" style="color:#e74c3c">止损</span><span class="tip-v" style="color:#e74c3c">'+t.sl_price+' ('+_fPct(t.sl_price,t.entry_price)+')</span></div>')}a.push('<div class="tip-row"><span class="tip-l">出场</span><span class="tip-v">'+t.exit_price+'</span></div>');var e=t.exit_reason||'';var ic=e==='止损'?'🛑':e==='超时'?'⏱️':'';a.push('<div class="tip-row"><span class="tip-l">离场</span><span class="tip-v" style="font-size:10px;color:#8892b0">'+ic+e+'</span></div>');if(isFeeFiltered){a.push('<div class="tip-row"><span class="tip-l">保本</span><span class="tip-v" style="font-size:10px;color:#525f7a">未触发</span></div>')}a.push('<div class="tip-row"><span class="tip-l">结果</span><span class="tip-v" style="color:'+(t.correct?'#2ecc71':'#e74c3c')+'">'+(t.correct?'✅':'❌')+'</span></div>');a.push('<div class="tip-row"><span class="tip-l">盈亏</span><span class="tip-v" style="color:'+(t.pnl_pct>=0?'#2ecc71':'#e74c3c')+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct+'% $'+(pnl$>=0?'+':'')+pnl$.toFixed(2)+'</span></div>');html+=a.join('')}
         tip.innerHTML=html;
         const x=param.point.x,y=param.point.y,wr=document.getElementById('chart-wrap').getBoundingClientRect();
         tip.style.left=(x+15>wr.right?x-160:x+15)+'px';tip.style.top=(y-10<wr.top?y+20:y-10)+'px';tip.style.display='block'
@@ -507,7 +510,7 @@ function loadData(){
         setTimeout(()=>{document.getElementById('progress-overlay').classList.remove('show');},300);
         if(reqId!==loadReqId)return;
         if(d.error){document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=d.error;info.textContent='❌ '+d.error;return}
-        candles=d.candles||[];trades=d.trades||[];stats=d.stats||{};
+        candles=d.candles||[];trades=d.trades||[];stats=d.stats||{};allSignals=d.all_signals||[];
         lastPrediction=d.prediction||null;
         renderChart();renderStats();renderTable();renderDistChart();
         updateNetPnl();
@@ -766,7 +769,7 @@ function jumpToTrade(ts){
                 const tr=tradeMap[c.t];
                 if(highlightFilter){
                     let matched=true;
-                    if(highlightFilter.type==='reason')matched=(tr.exit_reason||'时间到')===highlightFilter.value;
+                    if(highlightFilter.type==='reason')matched=(tr.exit_reason||'超时')===highlightFilter.value;
                     else if(highlightFilter.type==='score'){const bucket=Math.floor(Math.abs(tr.score)/10)*10;matched=bucket===highlightFilter.value;}
                     if(!matched)return;
                 }
@@ -849,14 +852,13 @@ function renderTable(){
     const ft=getFilteredTrades(trades);
     if(!ft.length){document.getElementById('table-wrap').innerHTML='<div style="padding:20px;text-align:center;color:#525f7a">暂无交易数据</div>';return}
     const sorted=[...ft].reverse();
-    let html='<table><thead><tr><th style="width:24px">#</th><th style="width:75px">时间</th><th>方向</th><th>评分</th><th>入场价</th><th style="color:#e74c3c">止损</th><th style="color:#2ecc71">止盈</th><th>出场价</th><th>PnL%</th><th>结果</th><th>原因</th></tr></thead><tbody>';
+    let html='<table><thead><tr><th style="width:24px">#</th><th style="width:75px">时间</th><th>方向</th><th>评分</th><th>入场价</th><th style="color:#e74c3c">止损</th><th>出场价</th><th>PnL%</th><th>结果</th><th>原因</th></tr></thead><tbody>';
     sorted.forEach((t,i)=>{
         const dirCls=t.direction==='bullish'?'td-up':'td-down',dirTxt=t.direction==='bullish'?'📈 多':'📉 空';
         const pnlCls=t.pnl_pct>=0?'td-pnl-pos':'td-pnl-neg',pnlTxt=(t.pnl_pct>=0?'+':'')+t.pnl_pct+'%';
         const resCls=t.correct?'td-ok':'td-fail',resTxt=t.correct?'✅':'❌';
         const slTxt=t.sl_price?t.sl_price.toFixed(1):'--';
-        const tpTxt=t.tp_price?t.tp_price.toFixed(1):'--';
-        html+='<tr onclick="jumpToTrade('+t.timestamp+')" style="cursor:pointer"><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+Math.abs(t.score)+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price" style="color:#e74c3c">'+slTxt+'</td><td class="td-price" style="color:#2ecc71">'+tpTxt+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td><td style="font-size:9px;color:#525f7a;white-space:nowrap">'+(t.exit_reason||'')+'</td></tr>';
+        html+='<tr onclick="jumpToTrade('+t.timestamp+')" style="cursor:pointer"><td class="td-time">'+(sorted.length-i)+'</td><td class="td-time">'+t.time+'</td><td class="'+dirCls+'">'+dirTxt+'</td><td class="td-num">'+Math.abs(t.score)+'</td><td class="td-price">'+t.entry_price+'</td><td class="td-price" style="color:#e74c3c">'+slTxt+'</td><td class="td-price">'+t.exit_price+'</td><td class="'+pnlCls+'">'+pnlTxt+'</td><td class="'+resCls+'">'+resTxt+'</td><td style="font-size:9px;color:#525f7a;white-space:nowrap">'+(t.exit_reason||'')+'</td></tr>';
     });
     document.getElementById('table-wrap').innerHTML=html+'</tbody></table>';
 }
@@ -936,8 +938,30 @@ function switchTab(tab){
     document.getElementById('dist-chart').style.display=tab==='dist'?'block':'none';
     document.getElementById('pos-panel').style.display=tab==='pos'?'block':'none';
     document.getElementById('score-panel').style.display=tab==='score'?'block':'none';
+    document.getElementById('signal-panel').style.display=tab==='signal'?'block':'none';
     if(tab==='pos')updatePosPanel();
     if(tab==='score')renderScoreChart();
+    if(tab==='signal')renderSignalDetail();
+}
+
+function renderSignalDetail(){
+    var el=document.getElementById('signal-panel');
+    if(!stats){el.innerHTML='<div style="text-align:center;color:#525f7a;padding:20px">加载中...</div>';return}
+    var s=stats;
+    var tot=s.signal_total||0,bull=s.signal_bullish||0,bear=s.signal_bearish||0,neu=s.signal_neutral||0;
+    var bP=bull&&tot?(bull/tot*100).toFixed(1):'0',beP=bear&&tot?(bear/tot*100).toFixed(1):'0',nP=neu&&tot?(neu/tot*100).toFixed(1):'0';
+    var html='<div style="padding:14px">'
+        +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:14px">'
+        +'<div style="background:#131a2b;border-radius:6px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:700;color:#667eea">'+tot+'</div><div style="color:#525f7a;font-size:11px;margin-top:4px">总信号数</div></div>'
+        +'<div style="background:#131a2b;border-radius:6px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:700;color:#2ecc71">'+bull+'</div><div style="color:#525f7a;font-size:11px;margin-top:4px">做多 ('+bP+'%)</div></div>'
+        +'<div style="background:#131a2b;border-radius:6px;padding:12px;text-align:center"><div style="font-size:24px;font-weight:700;color:#e74c3c">'+bear+'</div><div style="color:#525f7a;font-size:11px;margin-top:4px">做空 ('+beP+'%)</div></div>'
+        +'</div>'
+        +'<div style="background:#131a2b;border-radius:6px;padding:14px">'
+        +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1a2340"><span style="color:#525f7a">观望</span><span style="color:#e8edf5;font-weight:600">'+neu+' ('+nP+'%)</span></div>'
+        +'<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #1a2340"><span style="color:#525f7a">做多占比</span><span style="color:#2ecc71;font-weight:600">'+bP+'%</span></div>'
+        +'<div style="display:flex;justify-content:space-between;padding:6px 0"><span style="color:#525f7a">做空占比</span><span style="color:#e74c3c;font-weight:600">'+beP+'%</span></div>'
+        +'</div></div>';
+    el.innerHTML=html;
 }
 
 initChart();
