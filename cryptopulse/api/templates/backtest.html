@@ -36,6 +36,7 @@ html,body{height:100%;overflow:hidden;background:#0b0e17;color:#e8edf5;font-fami
 .progress-bar{width:280px;height:4px;background:#1a2340;border-radius:4px;overflow:hidden}
 .progress-bar-fill{height:100%;width:0%;background:linear-gradient(90deg,#667eea,#764ba2);border-radius:4px;transition:width .3s ease}
 .progress-text{color:#8892b0;font-size:12px}
+@keyframes progress-indeterminate{0%{width:0%;margin-left:0}50%{width:60%;margin-left:20%}100%{width:0%;margin-left:100%}}
 /* 隐藏数字输入框箭头 */
 input[type=number]::-webkit-outer-spin-button,input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 input[type=number]{-moz-appearance:textfield}
@@ -480,22 +481,21 @@ function loadData(){
         const days=(e-s)/(86400000);
         totalEst=Math.max(100,Math.round(days*1440));
     }else{totalEst=10000;}
-    // 每500根K线约1秒，加1秒保底
-    const estSec=Math.max(2,Math.round(totalEst/500)+1);
-    const startTime=Date.now();
+    // 估算时间：约 800 根/秒
+    var estSec=Math.max(3,Math.round(totalEst/800));
+    var startTime=Date.now();
     const barFill=document.querySelector('#progress-overlay .progress-bar-fill');
     const barText=document.getElementById('progress-text');
     document.getElementById('progress-overlay').classList.add('show');
     barFill.style.animation='none';barFill.style.width='0%';
-    barText.textContent='估算 '+totalEst+' 根K线，约需 '+estSec+' 秒...';
-    // 模拟进度更新
-    const progTimer=setInterval(()=>{
-        const elapsed=(Date.now()-startTime)/1000;
-        const pct=Math.min(95,Math.round(elapsed/estSec*100));
-        barFill.style.width=pct+'%';
-        const remain=Math.max(0,estSec-Math.round(elapsed));
-        barText.textContent='正在处理 '+totalEst+' 根K线 · '+pct+'% · 预计剩余 '+remain+' 秒';
-    },200);
+    barText.textContent='估算 '+totalEst+' 根K线，约 '+estSec+' 秒...';
+    const progTimer=setInterval(function(){
+        var el=(Date.now()-startTime)/1000;
+        var p=Math.min(95,Math.round(el/estSec*100));
+        barFill.style.width=p+'%';
+        var r=Math.max(0,estSec-Math.round(el));
+        if(r>0)barText.textContent='正在处理 '+totalEst+' 根K线 · '+p+'% · 预计剩余 '+r+' 秒';
+    },300);
     let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+document.getElementById('sel-sl').value+'&tp='+document.getElementById('sel-tp').value+'&_t='+Date.now();
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}

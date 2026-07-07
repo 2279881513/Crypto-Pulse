@@ -913,11 +913,23 @@ def api_backtest():
             neutral_s = sum(1 for r in sig_rows if r["direction"] == "neutral")
             import io as _io
             b = _io.StringIO()
+            # ---- 交易汇总 ----
+            if total_trades > 0:
+                b.write("【回测结果汇总】\n")
+                if fee_filter: b.write(f"(已开启保本过滤, 阈值 {round(fee_rate*2*100,3)}%)\n")
+                b.write(f"交易笔数,{total_trades}\n正确,{correct_trades} ({round(correct_trades/total_trades*100,1)}%)\n错误,{wrong_trades} ({round(wrong_trades/total_trades*100,1)}%)\n")
+                b.write(f"准确率,{accuracy}%\n总毛利,{round(total_pnl_pct,2)}%\n总手续费,{round(total_trades*fee_rate*2*100,2)}%\n净利,{round(total_pnl_pct-total_trades*fee_rate*2*100,2)}%\n")
+                b.write(f"胜率,{win_rate}%\n盈亏比,{profit_factor}\n平均盈,{avg_win}%\n平均亏,{avg_loss}%\n")
+                sl_c = sum(1 for t in trades if t["exit_reason"] == "止损")
+                tp_c = sum(1 for t in trades if t["exit_reason"] == "止盈")
+                ti_c = sum(1 for t in trades if t["exit_reason"] == "时间到")
+                b.write(f"止损,{sl_c}笔({round(sl_c/total_trades*100,1)}%)\n止盈,{tp_c}笔({round(tp_c/total_trades*100,1)}%)\n时间到,{ti_c}笔({round(ti_c/total_trades*100,1)}%)\n")
+                b.write(f"\n【仓位参数】\n本金,{cap} USDT\n杠杆,{int(lev)}x\n费率,{round(fee_rate*100,2)}%\n每笔手续费,{round(fee_rate*2*100,3)}%\n总手续费金额,{round(total_trades*fee_rate*2*cap*lev/100,1)} USDT\n\n")
+            # ---- 信号明细 ----
             b.write("【信号明细汇总】\n")
             b.write(f"总信号数,{total_s}\n做多,{bullish}\n做空,{bearish}\n观望,{neutral_s}\n")
-            b.write(f"做多占比,{round(bullish/total_s*100,1)}%\n做空占比,{round(bearish/total_s*100,1)}%\n观望占比,{round(neutral_s/total_s*100,1)}%\n")
-            b.write(f"\n【仓位参数】\n本金,{cap} USDT\n杠杆,{int(lev)}x\n费率,{round(fee_rate*100,2)}%\n")
-            b.write("\n【信号明细】\n")
+            b.write(f"做多占比,{round(bullish/total_s*100,1)}%\n做空占比,{round(bearish/total_s*100,1)}%\n观望占比,{round(neutral_s/total_s*100,1)}%\n\n")
+            b.write("【信号明细】\n")
             cols = ["#","time","price","open","high","low","volume","direction","score","confidence","reason",
                     "entry_price","sl_price","tp_price","exit_price","exit_reason","correct","pnl_pct","保本",
                     "ema","momentum","macd","rsi_val","rsi_score","bb","vol_ratio","vol_score",
