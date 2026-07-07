@@ -895,7 +895,8 @@ def api_backtest():
             csv_df = pd.DataFrame(trades)
             avail_cols = [c for c in first_cols if c in csv_df.columns]
             csv_df[avail_cols].to_csv(b, index=False)
-            return Response(b.getvalue(), mimetype="text/csv;charset=utf-8-sig", headers={"Content-Disposition": f"attachment; filename=backtest_{style}.csv"})
+            ts_str = time.strftime("%Y%m%d_%H%M%S")
+            return Response(b.getvalue(), mimetype="text/csv;charset=utf-8-sig", headers={"Content-Disposition": f"attachment; filename=backtest_{style}_{ts_str}.csv"})
 
         return jsonify({
             "symbol": symbol,
