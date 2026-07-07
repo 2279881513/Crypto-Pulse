@@ -439,8 +439,12 @@ function exportCSV(){
     const lookahead=document.getElementById('sel-lookahead').value;
     const sl=document.getElementById('sel-sl').value;
     const tp=document.getElementById('sel-tp').value;
+    const feed=document.getElementById('pos-fee').value;
+    const feeFilter=document.getElementById('chk-fee-filter').checked?'1':'0';
+    const cap=document.getElementById('pos-capital').value;
+    const lev=document.getElementById('pos-leverage').value;
     const dateRange=parseDateRange(document.getElementById('date-range'));
-    let url='/api/backtest/export?style='+currentStyle+'&lookahead='+lookahead+'&sl='+sl+'&tp='+tp;
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+sl+'&tp='+tp+'&format=csv&fee='+feed+'&fee_filter='+feeFilter+'&cap='+cap+'&lev='+lev+'&_t='+Date.now();
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(end)url+='&end='+end;}
     window.open(url,'_blank');
@@ -795,7 +799,7 @@ function renderStats(){
         const losses=ft.filter(t=>t.pnl_pct<=0);
         useStats.avg_win=wins.length?Math.round(ft.filter(t=>t.pnl_pct>0).reduce((s,t)=>s+t.pnl_pct,0)/wins.length*100)/100:0;
         useStats.avg_loss=losses.length?Math.round(ft.filter(t=>t.pnl_pct<=0).reduce((s,t)=>s+t.pnl_pct,0)/losses.length*100)/100:0;
-        useStats.profit_factor=useStats.avg_loss?Math.abs(useStats.avg_win/useStats.avg_loss):0;
+        useStats.profit_factor=losses.length?Math.round(Math.abs(ft.filter(t=>t.pnl_pct>0).reduce((s,t)=>s+t.pnl_pct,0)/ft.filter(t=>t.pnl_pct<=0).reduce((s,t)=>s+t.pnl_pct,0))*100)/100:0;
         useStats.bullish=ft.filter(t=>t.direction==='bullish').length;
         useStats.bearish=ft.filter(t=>t.direction==='bearish').length;
         useStats.correct_bullish=ft.filter(t=>t.direction==='bullish'&&t.correct).length;
