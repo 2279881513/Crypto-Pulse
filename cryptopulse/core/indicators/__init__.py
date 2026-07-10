@@ -166,16 +166,35 @@ def score_indicators(df: pd.DataFrame) -> tuple[Direction, float, dict]:
         total *= 1.15
         scores["trend_boost"] = True
 
-    # ========== 方向判定（调高阈值到30） ==========
+    # ========== 强趋势豁免机制 (2026-07-10) ==========
+    # ADX > 50 且价格触及布林带上下轨时，绕过评分阈值直接进场
+    # 原因：历史数据表明强趋势+极值位置是确定性最高的进场点
+    bb_pos = latest.get("bb_position", 0)
+    if adx >= 50 and abs(bb_pos) >= 2.0:
+        scores["strong_trend_exempt"] = True
+        exempt_score = max(-80, min(80, total * 1.3))  # 更强放大(1.3x)
+        if bb_pos >= 2.0:
+            scores["exempt_reason"] = "强趋势+布林上轨，豁免做空"
+            return Direction.BEARISH, round(exempt_score, 1), scores
+        else:
+            scores["exempt_reason"] = "强趋势+布林下轨，豁免做多"
+            return Direction.BULLISH, round(exempt_score, 1), scores
+
+    # ========== 方向判定（动态阈值） ==========
+    # 强趋势(ADX>=35)中降低评分阈值到15，让更多信号通过
     # 数据验证: 阈值30+ADX≥30 → 56.4%准确率 +19.60%PnL
     # 相比原始系统: 55.1%准确率 +16.35%PnL
-    threshold = 30
+    if adx >= 35:
+        threshold = 15
+        scores["threshold_reduced"] = f"阈值降至15(ADX={adx:.0f})"
+    else:
+        threshold = 30
+
     if total > threshold:
         direction = Direction.BULLISH
     elif total < -threshold:
         direction = Direction.BEARISH
     else:
-        direction = Direction.NEUTRAL
         direction = Direction.NEUTRAL
 
     return direction, round(total, 1), scores
@@ -228,10 +247,10 @@ def _score_macd(latest: pd.Series, prev: pd.Series) -> float:
 
 
 def _score_rsi(latest: pd.Series) -> float:
-    """RSI 评分（加密币使用 80/20 阈值，增加粒度）"""
+    """RSI 评分（加密币使用 70/30 阈值，增加粒度）"""
     rsi = latest.get("rsi", 50)
 
-    if rsi > 80:
+    if rsi > 70:
         return -0.8  # 超买，看空
     elif rsi > 72:
         return -0.5  # 高度超买区域
@@ -247,7 +266,7 @@ def _score_rsi(latest: pd.Series) -> float:
         return 0.1   # 中性偏空
     elif rsi > 28:
         return 0.3   # 偏空低位
-    elif rsi > 20:
+    elif rsi > 30:
         return 0.5   # 低超卖区域
     else:
         return 0.8   # 超卖，看多

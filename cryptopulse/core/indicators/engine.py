@@ -40,7 +40,7 @@ class TechnicalSignalEngine:
     多周期技术信号引擎
 
     短线参数（1m/5m）:
-        EMA(5,13,21), MACD(5,13,5), RSI(14) 80/20, BB(20,2.5)
+        EMA(5,13,21), MACD(5,13,5), RSI(14) 70/30, BB(20,2.5)
 
     中线参数（4h/1d）:
         EMA(20,50,200), MACD(12,26,9), RSI(14) 75/25, BB(20,3.0)
@@ -51,7 +51,7 @@ class TechnicalSignalEngine:
         if style == "short_term":
             self.ema_fast, self.ema_mid, self.ema_slow = 5, 13, 21
             self.macd_fast, self.macd_slow, self.macd_signal = 5, 13, 5
-            self.rsi_period, self.rsi_ob, self.rsi_os = 14, 80, 20
+            self.rsi_period, self.rsi_ob, self.rsi_os = 14, 70, 30
             self.bb_period, self.bb_std = 20, 2.5
             self.adx_period = 14
         else:
@@ -90,6 +90,7 @@ class TechnicalSignalEngine:
         bb_upper, bb_mid, bb_lower = bollinger(close, self.bb_period, self.bb_std)
         atr_val = atr(high, low, close, 14)
         adx_val = adx(high, low, close, self.adx_period)
+        bb_std_calc = (bb_upper[-1] - bb_mid[-1]) / 2.5 if not np.isnan(bb_upper[-1]) else 0
         obv_val = obv(close, vol)
 
         # 体积比（当前量 / 20周期均量）
@@ -112,17 +113,38 @@ class TechnicalSignalEngine:
         at_bb_upper_band = not np.isnan(bb_upper[-1]) and price >= bb_upper[-1] - (bb_upper[-1] - bb_mid[-1]) * 0.3
 
         # ---- RSI极值 + BB位置入场（优化参数） ----
-        is_oversold = not np.isnan(rsi_val[-1]) and rsi_val[-1] <= 20
-        is_ob = not np.isnan(rsi_val[-1]) and rsi_val[-1] >= 80
+        is_oversold = not np.isnan(rsi_val[-1]) and rsi_val[-1] <= 30
+        is_ob = not np.isnan(rsi_val[-1]) and rsi_val[-1] >= 70
         ema_trend_up = not np.isnan(ema_f[-1]) and price > ema_f[-1]
         ema_trend_down = not np.isnan(ema_f[-1]) and price < ema_f[-1]
         direction = Direction.NEUTRAL; total_score = 0
         if is_oversold and at_bb_lower and adx_latest >= 10:
             direction = Direction.BULLISH; total_score = 60
-        if direction == Direction.NEUTRAL and is_ob and at_bb_upper_band and adx_latest >= 10 and adx_latest <= 45:
-            direction = Direction.BEARISH; total_score = -60
+        # 做空：ADX>45时强趋势中不做空，但ADX>50+BB上轨时强趋势豁免
+        if direction == Direction.NEUTRAL and is_ob and at_bb_upper_band and adx_latest >= 10:
+            if adx_latest <= 45 or adx_latest > 50:
+                direction = Direction.BEARISH; total_score = -60
+
+        # 强趋势豁免：ADX>=50 + 布林带触边时，直接判定方向
+        if direction == Direction.NEUTRAL and adx_latest >= 50:
+            bb_pos_val = (price - bb_mid[-1]) / (bb_std_calc + 1e-10) if bb_std_calc > 0 else 0
+            if bb_pos_val >= 2.0:
+                direction = Direction.BEARISH; total_score = -60
+            elif bb_pos_val <= -2.0:
+                direction = Direction.BULLISH; total_score = 60
+
         confidence = min(100, max(30, int(55 + adx_latest * 0.5)))
         if direction != Direction.NEUTRAL and confidence < 35:
+            direction = Direction.NEUTRAL
+
+        # === 强趋势方向保护：ADX>45时只允许顺势交易（防止逆势抄底/摸顶） ===
+        if direction != Direction.NEUTRAL and adx_latest > 45:
+            if direction == Direction.BULLISH and ema_trend_down:
+                direction = Direction.NEUTRAL
+            elif direction == Direction.BEARISH and ema_trend_up:
+                direction = Direction.NEUTRAL
+        # === 极端趋势保护：ADX>80不开新仓 ===
+        if direction != Direction.NEUTRAL and adx_latest > 80:
             direction = Direction.NEUTRAL
 
         # ---- 5m 方向一致性过滤 ----

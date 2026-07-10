@@ -20,10 +20,36 @@ if str(_root) not in sys.path:
 
 from flask import Flask, render_template, jsonify, request, Response
 
-# 代理配置
-PROXY = os.environ.get("PROXY", "") or os.environ.get("HTTP_PROXY", "") or ""
+
+# ---- NumPy JSON 编码器（防止 bool_/int64/float64 导致 jsonify 报错） ----
+class _NumpyProvider(Flask.json_provider_class):
+    def dumps(self, obj, **kwargs):
+        return super().dumps(_convert_numpy(obj), **kwargs)
+
+
+def _convert_numpy(obj):
+    """递归地将 numpy 类型转换为原生 Python 类型"""
+    if isinstance(obj, dict):
+        return {k: _convert_numpy(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_convert_numpy(v) for v in obj]
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
 
 app = Flask(__name__)
+app.json_provider_class = _NumpyProvider
+app.json = _NumpyProvider(app)
+
+# 代理配置
+PROXY = os.environ.get("PROXY", "") or os.environ.get("HTTP_PROXY", "") or ""
 
 # ---- 历史记录存储 ----
 HISTORY_FILE = _root / "data" / "signal_history.jsonl"
@@ -371,8 +397,8 @@ def _compute_signal(i,close,high,low,openp,vol,
     # ---- EMA趋势过滤 + RSI极值入场 ----
     adx_l=adx_v if not np.isnan(adx_v) else 0
     d="neutral"; cf=30; total_score=0
-    is_oversold = not np.isnan(rsi_v) and rsi_v <= 20
-    is_ob = not np.isnan(rsi_v) and rsi_v >= 80
+    is_oversold = not np.isnan(rsi_v) and rsi_v <= 30
+    is_ob = not np.isnan(rsi_v) and rsi_v >= 70
     at_bb_lower = not np.isnan(bb_u) and price <= bb_l + (bb_m - bb_l) * 0.3
     at_bb_upper = not np.isnan(bb_u) and price >= bb_u - (bb_u - bb_m) * 0.3
     ema_trend_up = not np.isnan(ema_f) and price > ema_f
@@ -380,10 +406,23 @@ def _compute_signal(i,close,high,low,openp,vol,
     if is_oversold and at_bb_lower and adx_l >= 10:
         d="bullish"; total_score=60
     # 做空：ADX>45时强趋势中不做空（用户数据：仅33%成功率）
-    if d=="neutral" and is_ob and at_bb_upper and adx_l >= 10 and adx_l <= 45:
-        d="bearish"; total_score=-60
+    # 但ADX>50+BB上轨时强趋势豁免做空
+    if d=="neutral" and is_ob and at_bb_upper and adx_l >= 10:
+        if adx_l <= 45 or adx_l > 50:
+            d="bearish"; total_score=-60
     cf=min(100,max(30,int(55+adx_l*0.5)))
     if d!="neutral" and cf<35: d="neutral"
+    # === 强趋势方向保护：ADX>45时只允许顺势交易 ===
+    # 防止在强下跌趋势中抄底、强上涨趋势中摸顶
+    if d != "neutral" and adx_l > 45:
+        if d == "bullish" and ema_trend_down:
+            d = "neutral"
+        elif d == "bearish" and ema_trend_up:
+            d = "neutral"
+    # === 极端趋势保护：ADX>80不开新仓 ===
+    # 极端单边行情中任何入场风险极高
+    if d != "neutral" and adx_l > 80:
+        d = "neutral"
     rlist=[]
     if is_oversold: rlist.append("RSI超卖")
     if is_ob: rlist.append("RSI超买")
@@ -391,7 +430,7 @@ def _compute_signal(i,close,high,low,openp,vol,
     if at_bb_upper: rlist.append("BB上轨")
     if adx_l>=35: rlist.append("趋势强")
     r=",".join(rlist[:4]) if rlist else "中性"
-    return {"direction":d,"score":round(total_score,1),"confidence":cf,"reason":r,"signals":s,"adx_val":adx_l,"rsi_val":rsi_v if not np.isnan(rsi_v) else 50}
+    return {"direction":d,"score":round(total_score,1),"confidence":cf,"reason":r,"signals":s,"adx_val":adx_l,"rsi_val":rsi_v if not np.isnan(rsi_v) else 50,"at_bb_lower":at_bb_lower,"at_bb_upper":at_bb_upper}
 
 
 @app.route("/api/backtest")
@@ -528,7 +567,7 @@ def api_backtest():
         signals_raw = []
         all_signals = []  # 所有信号（含观望）
         # 进场冷却：同一方向连续信号间隔不足 cool_bars 根 K 线时跳过
-        cool_bars = 1  # 冷却 K 线数（用户发现连续超卖时应允许多次进场）
+        cool_bars = 2  # 冷却K线数：至少间隔1根K线（原为1导致连续逆势进场）
         last_trade_dir = None
         last_trade_idx = -cool_bars
         for i in range(len(df)):
@@ -544,8 +583,24 @@ def api_backtest():
                     # 进场冷却检查
                     dir_now = signal["direction"]
                     if dir_now == last_trade_dir and i - last_trade_idx < cool_bars:
-                        # 同方向冷却期内，把当前信号标记为"被冷却跳过"但记录在 all_signals
-                        signal["cooled"] = True
+                        # 强趋势+布林带触边时，冷却期豁免（仍有最小间隔限制）
+                        adx_val = signal.get("adx_val", 0)
+                        sig_bb_lower = signal.get("at_bb_lower", False)
+                        sig_bb_upper = signal.get("at_bb_upper", False)
+                        if adx_val > 50 and (sig_bb_lower or sig_bb_upper):
+                            # 豁免但至少间隔0根K线（阻止同一根K线重复进场）
+                            if i - last_trade_idx >= 1:
+                                signal["cooled"] = False
+                                signal["cooling_exempt"] = True
+                                if trade_start_ms <= 0 or ts >= trade_start_ms:
+                                    signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
+                                    last_trade_dir = dir_now
+                                    last_trade_idx = i
+                            else:
+                                signal["cooled"] = True
+                        else:
+                            # 同方向冷却期内，把当前信号标记为"被冷却跳过"但记录在 all_signals
+                            signal["cooled"] = True
                     else:
                         signal["cooled"] = False
                         if trade_start_ms <= 0 or ts >= trade_start_ms:
