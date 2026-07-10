@@ -166,7 +166,7 @@ def _save_chart_signal(candle_ts: int, signal: dict, price: float) -> None:
         import time
         record = {
             "_ts": candle_ts,
-            "_time": time.strftime("%m-%d %H:%M", time.localtime(candle_ts / 1000)),
+            "_time": time.strftime("%m-%d %H:%M", time.gmtime(candle_ts / 1000)),
             "price": price,
             "direction": signal["direction"],
             "score": signal["score"],
@@ -704,7 +704,7 @@ def api_backtest():
 
             trades.append({
                 "timestamp": entry_ts,
-                "time": time.strftime("%m-%d %H:%M", time.localtime(entry_ts / 1000)),
+                "time": time.strftime("%m-%d %H:%M:%S", time.gmtime(entry_ts / 1000)),
                 "direction": sig["direction"],
                 "score": sig["score"],
                 "confidence": sig["confidence"],
@@ -760,7 +760,7 @@ def api_backtest():
                 max_consecutive_losses = max(max_consecutive_losses, cur_losses)
 
         def _fmt_ts(ts: int) -> str:
-            return datetime.fromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M")
+            return datetime.utcfromtimestamp(ts / 1000).strftime("%Y-%m-%d %H:%M")
 
         # 最后一条信号的预测（下一根K线方向）
         # 从末尾往前找最后一个有信号的K线作为预测
@@ -788,7 +788,7 @@ def api_backtest():
                 atr_v = all_atr[idx] if not np.isnan(all_atr[idx]) else 0
                 adx_v = all_adx[idx] if not np.isnan(all_adx[idx]) else 20
                 vr = vol[idx] / all_vol_ma20[idx] if all_vol_ma20[idx] > 0 else 1
-                hr = time.localtime(sr["ts"] / 1000).tm_hour
+                hr = time.gmtime(sr["ts"] / 1000).tm_hour
                 is_dir = sig["direction"] != "neutral"
                 # SL/TP验证
                 entry_price = p
@@ -822,7 +822,7 @@ def api_backtest():
                 fee_cost = round(fee_rate * 2 * 100, 3)
                 fee_triggered = is_dir and abs(pnl_pct or 0) < fee_cost
                 row = {
-                    "time": time.strftime("%Y-%m-%d %H:%M", time.localtime(sr["ts"] / 1000)),
+                    "time": time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(sr["ts"] / 1000)),
                     "price": round(p, 1),
                     "open": round(openp[idx], 1),
                     "high": round(high[idx], 1),
