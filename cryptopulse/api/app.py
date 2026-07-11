@@ -876,7 +876,8 @@ def api_backtest():
                 tp_c = sum(1 for t in trades if t["exit_reason"] == "止盈")
                 ti_c = sum(1 for t in trades if t["exit_reason"] == "超时")
                 b.write(f"止损,{sl_c}笔({round(sl_c/total_trades*100,1)}%)\n止盈,{tp_c}笔({round(tp_c/total_trades*100,1)}%)\n超时,{ti_c}笔({round(ti_c/total_trades*100,1)}%)\n")
-                b.write(f"\n【仓位参数】\n本金,{cap} USDT\n杠杆,{int(lev)}x\n费率,{round(fee_rate*100,2)}%\n每笔手续费,{round(fee_rate*2*100,3)}%\n总手续费金额,{round(total_trades*fee_rate*2*cap*lev/100,1)} USDT\n\n")
+                b.write(f"\n【仓位参数】\n本金,{cap} USDT\n杠杆,{int(lev)}x\n费率,{round(fee_rate*100,2)}%\n每笔手续费,{round(fee_rate*2*100,3)}%\n总手续费金额,{round(total_trades*fee_rate*2*cap*lev/100,1)} USDT\n")
+                b.write(f"验证值,{lookahead}根K线\n\n")
             # ---- 信号明细 ----
             b.write("【信号明细汇总】\n")
             b.write(f"总信号数,{total_s}\n做多,{bullish}\n做空,{bearish}\n观望,{neutral_s}\n")
