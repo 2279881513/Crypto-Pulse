@@ -85,6 +85,18 @@ header { flex-shrink: 0; margin-bottom: 10px; }
 .setting-group select { width: auto; cursor: pointer; }
 .setting-group input:focus, .setting-group select:focus { border-color: var(--blue); }
 
+/* ========== RISK BAR ========== */
+.risk-bar {
+    display: flex; align-items: center; gap: 8px; flex-shrink: 0;
+    background: rgba(255,152,0,0.08); border: 1px solid rgba(255,152,0,0.3);
+    border-radius: 8px; padding: 6px 14px; margin-bottom: 6px;
+    font-size: 11px; color: #ff9800;
+}
+.risk-bar.ok {
+    background: rgba(46,204,113,0.08); border: 1px solid rgba(46,204,113,0.3);
+    color: var(--green);
+}
+
 /* ========== MAIN GRID ========== */
 #main-content {
     flex: 1; display: flex; flex-direction: column; gap: 6px;

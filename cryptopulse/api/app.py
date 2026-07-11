@@ -8,7 +8,6 @@ import json
 import os
 import sys
 import time
-import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -19,6 +18,11 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 from flask import Flask, render_template, jsonify, request, Response
+
+from cryptopulse.core.risk import get_risk_manager
+
+# ---- Risk Manager ----
+risk_mgr = get_risk_manager()
 
 
 # ---- NumPy JSON 编码器（防止 bool_/int64/float64 导致 jsonify 报错） ----
@@ -51,26 +55,7 @@ app.json = _NumpyProvider(app)
 # 代理配置
 PROXY = os.environ.get("PROXY", "") or os.environ.get("HTTP_PROXY", "") or ""
 
-# ---- 历史记录存储 ----
-HISTORY_FILE = _root / "data" / "signal_history.jsonl"
-HISTORY_FILE.parent.mkdir(exist_ok=True)
-MAX_HISTORY = 10000
-CLEAR_FILE = _root / "data" / "signal_clear.txt"
 LOG_FILE = _root / "data" / "cryptopulse.log"
-
-
-def _get_clear_timestamp() -> int:
-    """获取清空时间戳，0=未清空"""
-    try:
-        if CLEAR_FILE.exists():
-            return int(CLEAR_FILE.read_text().strip())
-    except Exception:
-        pass
-    return 0
-
-
-def _set_clear_timestamp(ts: int) -> None:
-    CLEAR_FILE.write_text(str(ts))
 
 
 def _log_event(event: str, data: dict = None) -> None:
@@ -81,104 +66,6 @@ def _log_event(event: str, data: dict = None) -> None:
             entry["data"] = data
         with open(LOG_FILE, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
-
-
-def _evaluate_history() -> int:
-    if not HISTORY_FILE.exists():
-        return 0
-    try:
-        lines = HISTORY_FILE.read_text(encoding="utf-8").strip().split("\n")
-        evaluated = 0
-        out_lines = []
-        for line in lines:
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except Exception:
-                out_lines.append(line)
-                continue
-            if "result" in rec:
-                out_lines.append(line)
-                continue
-            rec["result"] = "pending"
-            out_lines.append(json.dumps(rec, ensure_ascii=False))
-            evaluated += 1
-        HISTORY_FILE.write_text("\n".join(out_lines) + "\n", encoding="utf-8")
-        return evaluated
-    except Exception:
-        return 0
-
-
-def _save_to_history(record: dict) -> None:
-    """保存信号到历史记录（JSON Lines）"""
-    try:
-        record["_ts"] = int(time.time() * 1000)
-        record["_time"] = time.strftime("%m-%d %H:%M", time.localtime())
-        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        # 限制文件行数
-        lines = HISTORY_FILE.read_text(encoding="utf-8").strip().split("\n")
-        if len(lines) > MAX_HISTORY:
-            HISTORY_FILE.write_text(
-                "\n".join(lines[-MAX_HISTORY:]) + "\n", encoding="utf-8"
-            )
-    except Exception:
-        pass
-
-
-def _load_history(limit: int = 50) -> list[dict]:
-    """加载历史记录"""
-    if not HISTORY_FILE.exists():
-        return []
-    try:
-        lines = HISTORY_FILE.read_text(encoding="utf-8").strip().split("\n")
-        records = []
-        for line in reversed(lines[-limit:]):
-            if line.strip():
-                records.append(json.loads(line))
-        return records
-    except Exception:
-        return []
-
-
-def _history_has_timestamp(ts: int) -> bool:
-    """检查历史文件中是否已有该时间戳的记录"""
-    if not HISTORY_FILE.exists():
-        return False
-    try:
-        ts_str = str(ts)
-        for line in HISTORY_FILE.read_text(encoding="utf-8").split("\n"):
-            if ts_str in line:
-                return True
-    except Exception:
-        pass
-    return False
-
-
-def _save_chart_signal(candle_ts: int, signal: dict, price: float) -> None:
-    """保存K线图信号到历史文件"""
-    try:
-        if _history_has_timestamp(candle_ts):
-            return
-        import time
-        record = {
-            "_ts": candle_ts,
-            "_time": time.strftime("%m-%d %H:%M", time.gmtime(candle_ts / 1000)),
-            "price": price,
-            "direction": signal["direction"],
-            "score": signal["score"],
-            "confidence": signal["confidence"],
-            "entry_optimal": signal.get("entry", price),
-            "stop_loss": signal.get("sl", price * 0.99),
-            "take_profit_1": signal.get("tp1", price * 1.01),
-            "take_profit_2": signal.get("tp2", price * 1.02),
-            "take_profit_3": signal.get("tp3", price * 1.03),
-        }
-        with open(HISTORY_FILE, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception:
         pass
 
@@ -241,52 +128,6 @@ def _fetch_candles(symbol: str, bar: str, limit: int) -> list:
 
 
 
-def _fetch_signal(symbol: str = "BTC-USDT", style: str = "short_term"):
-    """获取数据并计算信号（第一阶技术面 + 第二阶微观结构）"""
-    from cryptopulse.core.data.ring_buffer import KLineRingBuffer
-    from cryptopulse.core.indicators.engine import TechnicalSignalEngine
-
-    interval = "1m" if style == "short_term" else "4H"
-    buf = KLineRingBuffer(capacity=200, interval=interval)
-
-    # --- 第一阶：技术面 ---
-    engine = TechnicalSignalEngine(style)
-    data = _okx_get("/api/v5/market/candles", {"instId": symbol, "bar": interval, "limit": "200"})
-    if data and "data" in data:
-        from cryptopulse.core.data.models import KLine
-        for item in reversed(data["data"]):
-            k = KLine.from_okx(item)
-            buf.push(k)
-
-    if not buf.is_full:
-        return None, f"Data insufficient ({buf.current_count}/200)"
-
-    df = buf.to_dataframe()
-    result = engine.evaluate(df)
-
-    # 获取最新价格
-    ticker = _okx_get("/api/v5/market/ticker", {"instId": symbol})
-    price = 0
-    if ticker and "data" in ticker:
-        price = float(ticker["data"][0].get("last", 0))
-    price = price or result.entry_optimal
-
-    _log_event("signal", {
-        "symbol": symbol, "style": style,
-        "direction": result.direction.value,
-        "score": result.score,
-        "confidence": result.confidence,
-        "price": price,
-    })
-
-    return {
-        "result": result,
-        "symbol": symbol,
-        "style": style,
-        "price": price,
-    }, None
-
-
 # ---- routes ----
 @app.route("/ping")
 def ping():
@@ -295,87 +136,7 @@ def ping():
 
 @app.route("/")
 def index():
-    error = None
-    signal = None
-    try:
-        symbol = os.environ.get("SYMBOL", "BTC-USDT")
-        style = os.environ.get("STYLE", "short_term")
-        signal, error = _fetch_signal(symbol, style)
-    except Exception as e:
-        error = f"{type(e).__name__}: {e}"
-        traceback.print_exc()
-    return render_template("index.html", signal=signal, error=error,
-                           proxy_configured=bool(PROXY),
-                           symbol=symbol, style=style)
-
-
-@app.route("/api/signal")
-def api_signal():
-    try:
-        symbol = os.environ.get("SYMBOL", "BTC-USDT")
-        style = request.args.get("style") or os.environ.get("STYLE", "short_term")
-        signal, error = _fetch_signal(symbol, style)
-        if error:
-            return jsonify({"error": error}), 503
-        r = signal["result"]
-        resp = {
-            "symbol": signal["symbol"], "style": signal["style"],
-            "price": signal["price"],
-            "direction": r.direction.value,
-            "score": r.score, "confidence": r.confidence,
-            "adx": r.adx_value,
-            "entry_optimal": r.entry_optimal,
-            "entry_zone_low": r.entry_zone_low,
-            "entry_zone_high": r.entry_zone_high,
-            "stop_loss": r.stop_loss,
-            "take_profit_1": r.take_profit_1,
-            "take_profit_2": r.take_profit_2,
-            "take_profit_3": r.take_profit_3,
-            "summary": r.summary,
-            "details": r.details,
-        }
-        if "micro" in signal:
-            resp["micro"] = signal["micro"]
-        _save_to_history(resp)
-        return jsonify(resp)
-    except Exception as e:
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
-
-
-@app.route("/api/history")
-def api_history():
-    limit = request.args.get("limit", 50, type=int)
-    return jsonify(_load_history(limit=limit))
-
-
-@app.route("/api/history", methods=["DELETE"])
-def clear_history():
-    """清空历史记录"""
-    try:
-        if HISTORY_FILE.exists():
-            HISTORY_FILE.write_text("", encoding="utf-8")
-        _set_clear_timestamp(int(time.time() * 1000))
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-
-@app.route("/api/history/restore", methods=["POST"])
-def restore_signals():
-    """恢复所有信号"""
-    _set_clear_timestamp(0)
-    return jsonify({"ok": True})
-
-
-@app.route("/chart")
-def chart_page():
-    """K 线信号回溯页面"""
-    return render_template("chart.html")
-
-
-@app.route("/backtest")
-def backtest_page():
-    """回测页面 — 测试系统正确率"""
+    """回测页面（主页面）"""
     return render_template("backtest.html")
 
 
@@ -631,11 +392,23 @@ def api_backtest():
             return Response(buf.getvalue(), mimetype="text/csv;charset=utf-8-sig", headers={"Content-Disposition": f"attachment; filename=klines_{style}.csv"})
 
         trades = []
+        sl_cooldown_until = 0  # 止损冷却截止时间戳（毫秒）
+        sl_cooldown_ms = 300 * 1000  # 5分钟
+        sl_cooldown_zones = []  # 收集冷却区间用于画线
+
         for sr in signals_raw:
             idx = sr["idx"]
             sig = sr["sig"]
             entry_price = sr["price"]
             entry_ts = sr["ts"]
+
+            # ---- 止损冷却检查 ----
+            if entry_ts < sl_cooldown_until:
+                # 在冷却期内，跳过此交易，标记风控原因
+                sig["risk_blocked"] = True
+                remaining_s = (sl_cooldown_until - entry_ts) // 1000
+                sig["risk_reason"] = "止损冷却中"
+                continue
 
             # 验证：看 lookahead 期间价格是否触摸过入场价方向（用高/低点，更宽容）
             future_end = min(idx + lookahead, len(df) - 1)
@@ -649,7 +422,10 @@ def api_backtest():
 
             # ---- 止盈止损: ATR ----
             atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else close[idx] * 0.005
-            sl_mult = 2.0; tp_mult = 5.0
+            # 止盈 = 入场价 + n × ATR, 其中n为风险系数(通常2-3)
+            risk_n = 3.0
+            sl_mult = 2.0
+            tp_mult = risk_n
             if is_bullish:
                 sl_price = entry_price - atr_entry * sl_mult
                 sl_init = sl_price
@@ -662,6 +438,19 @@ def api_backtest():
                 sl_price = entry_price
                 tp_price = entry_price
                 sl_init = entry_price
+
+            # ---- 保本检查：TP1利润必须高于手续费才值得进场 ----
+            fee_cost_pct = fee_rate * 2 * 100  # 双边手续费百分比
+            if is_bullish:
+                tp1_pct = (tp_price / entry_price - 1) * 100
+            elif is_bearish:
+                tp1_pct = (1 - tp_price / entry_price) * 100
+            else:
+                tp1_pct = 0
+            if tp1_pct <= fee_cost_pct:
+                sig["risk_blocked"] = True
+                sig["risk_reason"] = "TP1利润不足覆盖手续费"
+                continue
 
             # ---- 验证出场（止损/止盈/超时） ----
             correct = False
@@ -681,7 +470,10 @@ def api_backtest():
                     # 再检查止损
                     if bar_low <= sl_price:
                         exit_price = sl_price
-                        correct = False; sl_hit = True; exit_reason = "止损"; break
+                        correct = False; sl_hit = True; exit_reason = "止损"
+                        sl_cooldown_until = df["timestamp"].iloc[j] + sl_cooldown_ms
+                        sl_cooldown_zones.append({"start_ts": df["timestamp"].iloc[j], "end_ts": sl_cooldown_until, "sl_price": sl_price})
+                        break
 
                 elif is_bearish:
                     if bar_low <= tp_price:
@@ -689,7 +481,10 @@ def api_backtest():
                         correct = True; tp_hit = True; exit_reason = "止盈"; break
                     if bar_high >= sl_price:
                         exit_price = sl_price
-                        correct = False; sl_hit = True; exit_reason = "止损"; break
+                        correct = False; sl_hit = True; exit_reason = "止损"
+                        sl_cooldown_until = df["timestamp"].iloc[j] + sl_cooldown_ms
+                        sl_cooldown_zones.append({"start_ts": df["timestamp"].iloc[j], "end_ts": sl_cooldown_until, "sl_price": sl_price})
+                        break
 
             # 如果止损止盈都没触发，用收盘价
             if not sl_hit and not tp_hit:
@@ -794,8 +589,10 @@ def api_backtest():
                 entry_price = p
                 # 方向对应的SL/TP — 根据5m ADX动态调整
                 atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else p * 0.005
+                # 止盈 = 入场价 + n × ATR
+                risk_n = 3.0
                 sl_mult_sig = 2.0
-                tp_mult_sig = 5.0
+                tp_mult_sig = risk_n
                 bull_sl = entry_price - atr_entry * sl_mult_sig
                 bull_tp = entry_price + atr_entry * tp_mult_sig
                 bear_sl = entry_price + atr_entry * sl_mult_sig
@@ -885,7 +682,15 @@ def api_backtest():
             b.write("【信号明细】\n")
             cols = ["#","time","price","open","high","low","volume","direction","score","confidence","reason",
                     "entry_price","sl_price","exit_price","exit_reason","correct","pnl_pct","保本",
-                    "rsi_val","rsi_score","bb","adx","atr","adx_category"]
+                    "rsi_val","rsi_score","bb","adx","atr","adx_category","风控原因"]
+            # 为每条信号添加风控原因（回测中检测是否在冷却期内）
+            for row in sig_rows:
+                if row.get("direction") in ("bullish", "bearish"):
+                    dir_str = "long" if row["direction"] == "bullish" else "short"
+                    can_open, reason = risk_mgr.can_open_new_position(dir_str)
+                    row["风控原因"] = reason if not can_open else ""
+                else:
+                    row["风控原因"] = ""
             avail = [c for c in cols if c in sig_rows[0]]
             csv_df = pd.DataFrame(sig_rows)
             csv_df[avail].to_csv(b, index=False)
@@ -930,112 +735,7 @@ def api_backtest():
             "total_candles": len(candles_out),
             "all_signals": [{"ts":s["ts"],"direction":s["sig"]["direction"],"score":s["sig"]["score"],"confidence":s["sig"]["confidence"],"reason":s["sig"]["reason"]} for s in all_signals],
             "prediction": prediction,
-        })
-
-    except Exception as e:
-        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
-
-
-def chart_data():
-    try:
-        symbol = os.environ.get("SYMBOL", "BTC-USDT")
-        style = request.args.get("style", "short_term")
-        limit = request.args.get("limit", 500, type=int)
-        limit = min(limit, 1000)
-        bar = "1m" if style == "short_term" else "4H"
-
-        # 优先从本地 Parquet 读取（update_data 持续更新），没有则回退到 OKX API
-        import pandas as pd
-        from cryptopulse.config import DATA_DIR
-        parquet_path = DATA_DIR / "BTC-USDT-SWAP" / f"klines_{bar.lower()}.parquet"
-        use_local = parquet_path.exists()
-
-        if use_local:
-            df = pd.read_parquet(parquet_path)
-            df = df.sort_values("timestamp").tail(limit).reset_index(drop=True)
-            if len(df) < 100:
-                use_local = False
-
-        if not use_local:
-            raw_items = _fetch_candles(symbol, bar, limit)
-            if not raw_items or len(raw_items) < 100:
-                return jsonify({"error": f"need >=100 candles, got {len(raw_items) if raw_items else 0}"}), 503
-            from cryptopulse.core.data.models import KLine
-            all_klines = []
-            for item in raw_items:
-                try:
-                    all_klines.append(KLine.from_okx(item))
-                except Exception:
-                    continue
-        else:
-            from cryptopulse.core.data.models import KLine
-            all_klines = []
-            for _, row in df.iterrows():
-                try:
-                    all_klines.append(KLine(
-                        timestamp=int(row["timestamp"]),
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=float(row["close"]),
-                        volume=float(row["volume"]),
-                        volume_quote=0.0,
-                    ))
-                except Exception:
-                    continue
-
-        # 滑窗计算每个位置的信号
-        clear_ts = _get_clear_timestamp()
-        from cryptopulse.core.data.ring_buffer import KLineRingBuffer
-        from cryptopulse.core.indicators.engine import TechnicalSignalEngine
-        engine = TechnicalSignalEngine(style)
-        buf = KLineRingBuffer(capacity=100, interval=bar)
-
-        candles_out = []
-        for i, k in enumerate(all_klines):
-            buf.push(k)
-            signal = None
-            if i >= 99 and buf.is_full and k.timestamp > clear_ts:
-                df = buf.to_dataframe()
-                try:
-                    result = engine.evaluate(df)
-                    signal = {
-                        "direction": result.direction.value,
-                        "score": result.score,
-                        "confidence": result.confidence,
-                        "entry": result.entry_optimal,
-                        "sl": result.stop_loss,
-                        "tp1": result.take_profit_1,
-                        "tp2": result.take_profit_2,
-                        "tp3": result.take_profit_3,
-                        "summary": result.summary,
-                    }
-                except Exception:
-                    pass
-                if signal and signal["direction"] != "neutral":
-                    _save_chart_signal(k.timestamp, signal, k.close)
-
-            candles_out.append({
-                "t": k.timestamp,
-                "o": k.open, "h": k.high, "l": k.low, "c": k.close,
-                "v": k.volume,
-                "s": signal,
-            })
-
-        # 最后一条信号的预测（下一根K线方向）
-        prediction = None
-        last_signal = candles_out[-1]["s"] if candles_out else None
-        if last_signal:
-            prediction = {
-                "direction": last_signal["direction"],
-                "score": last_signal["score"],
-                "confidence": last_signal["confidence"],
-            }
-
-        return jsonify({
-            "symbol": symbol, "style": style,
-            "candles": candles_out, "total": len(candles_out),
-            "prediction": prediction,
+            "sl_cooldown_zones": sl_cooldown_zones,
         })
 
     except Exception as e:
@@ -1054,25 +754,37 @@ def api_logs():
         return jsonify([])
 
 
-@app.route("/api/analysis")
-def api_analysis():
-    """信号统计分析"""
-    records = _load_history(limit=10000)
-    if not records:
-        return jsonify({"total": 0})
-    total = len(records)
-    bullish = sum(1 for r in records if r.get("direction") == "bullish")
-    bearish = sum(1 for r in records if r.get("direction") == "bearish")
-    neutral = sum(1 for r in records if r.get("direction") == "neutral")
-    has_result = [r for r in records if "result" in r]
-    correct = sum(1 for r in has_result if r["result"] == "correct")
-    wrong = sum(1 for r in has_result if r["result"] == "wrong")
-    pending = sum(1 for r in has_result if r["result"] == "pending")
-    return jsonify({
-        "total": total, "bullish": bullish, "bearish": bearish, "neutral": neutral,
-        "evaluated": len(has_result),
-        "correct": correct, "wrong": wrong, "pending": pending,
-    })
+@app.route("/api/risk/status")
+def api_risk_status():
+    """获取当前风控状态"""
+    try:
+        return jsonify(risk_mgr.get_risk_status())
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/risk/trigger-sl", methods=["POST"])
+def api_risk_trigger_sl():
+    """手动触发止损冷却"""
+    try:
+        data = request.get_json(silent=True) or {}
+        reason = data.get("reason", "手工触发")
+        risk_mgr.trigger_stop_loss(reason)
+        _log_event("risk_trigger_sl", {"reason": reason})
+        return jsonify({"ok": True, "status": risk_mgr.get_risk_status()})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/risk/clear-sl", methods=["POST"])
+def api_risk_clear_sl():
+    """清除止损冷却状态"""
+    try:
+        risk_mgr.clear_stop_loss()
+        _log_event("risk_clear_sl", {})
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
