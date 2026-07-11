@@ -111,14 +111,11 @@ td{padding:3px 6px;border-bottom:1px solid #0f1420;font-family:'Courier New',mon
         <button class="btn-s" id="btn-realtime" onclick="toggleRealtime()" style="background:#1e2a45;color:#8892b0">🔄 实时</button>
         <span>验证</span>
         <select id="sel-lookahead" style="width:45px">
-            <option value="1">1</option>
-            <option value="5">5</option>
-            <option value="10" selected>10</option>
+            <option value="5" selected>5</option>
+            <option value="10">10</option>
+            <option value="20">20</option>
+            <option value="30">30</option>
         </select>
-        <span style="color:#525f7a;font-size:9px">损</span>
-        <input id="sel-sl" type="text" value="0.15" style="width:32px;background:#131a2b;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:monospace;outline:none" title="止损%">
-        <span style="color:#525f7a;font-size:9px">盈</span>
-        <input id="sel-tp" type="text" value="0.25" style="width:32px;background:#131a2b;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:monospace;outline:none" title="止盈%">
         <button id="btn-histpred" class="btn-r" onclick="toggleHistPred()" style="background:transparent;border:1px solid #525f7a;font-size:10px;color:#525f7a">📊 预测</button>
         <button class="btn-r" onclick="loadData()">回测</button>
         <button class="btn-r" onclick="exportCSV()" style="background:#1e2a45;color:#8892b0">📥 导出</button>
@@ -415,7 +412,7 @@ function silentReload(){
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
     const dateRange=parseDateRange(document.getElementById('date-range'));
-    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+document.getElementById('sel-sl').value+'&tp='+document.getElementById('sel-tp').value+'&_t='+Date.now();
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&_t='+Date.now();
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);}
     else if(start){url+='&start='+start;}
@@ -444,14 +441,12 @@ function exportCSV(){
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
     const lookahead=document.getElementById('sel-lookahead').value;
-    const sl=document.getElementById('sel-sl').value;
-    const tp=document.getElementById('sel-tp').value;
     const feed=document.getElementById('pos-fee').value;
     const feeFilter=document.getElementById('chk-fee-filter').checked?'1':'0';
     const cap=document.getElementById('pos-capital').value;
     const lev=document.getElementById('pos-leverage').value;
     const dateRange=parseDateRange(document.getElementById('date-range'));
-    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+sl+'&tp='+tp+'&format=csv&fee='+feed+'&fee_filter='+feeFilter+'&cap='+cap+'&lev='+lev+'&_t='+Date.now();
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&format=csv&fee='+feed+'&fee_filter='+feeFilter+'&cap='+cap+'&lev='+lev+'&_t='+Date.now();
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(end)url+='&end='+end;}
     window.open(url,'_blank');
@@ -499,7 +494,7 @@ function loadData(){
         var r=Math.max(0,estSec-Math.round(el));
         if(r>0)barText.textContent='正在处理 '+totalEst+' 根K线 · '+p+'% · 预计剩余 '+r+' 秒';
     },300);
-    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&sl='+document.getElementById('sel-sl').value+'&tp='+document.getElementById('sel-tp').value+'&_t='+Date.now();
+    let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&_t='+Date.now();
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
