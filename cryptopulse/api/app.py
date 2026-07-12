@@ -190,7 +190,7 @@ def _compute_signal(i,close,high,low,openp,vol,
     # ---- 成交量确认 ----
     vol_ma20 = all_vol_ma20[i] if all_vol_ma20 is not None and all_vol_ma20[i] > 0 else None
     vol_ratio = vol[i] / vol_ma20 if vol_ma20 else 1.0
-    vol_confirm = vol_ratio > 2.0
+    vol_confirm = vol_ratio > 1.8
 
     # ---- ATR 参考 ----
     atr_v = all_atr[i] if all_atr is not None and not np.isnan(all_atr[i]) else (c * 0.005)
