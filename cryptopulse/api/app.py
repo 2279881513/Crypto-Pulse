@@ -262,15 +262,16 @@ def _compute_signal(i,close,high,low,openp,vol,
             tp_dist = atr_dist
         
         if is_short:
-            tp1 = entry_price - tp_dist
-            tp2 = entry_price - tp_dist * 1.5
-            tp3 = entry_price - tp_dist * 2.0
-            # Fix6: 到达TP1后将止损移至成本价
+            # tp1 拉远到 tp_dist×4（≈ATR×8），让追踪止损先工作
+            tp1 = entry_price - tp_dist * 4
+            tp2 = entry_price - tp_dist * 6
+            tp3 = entry_price - tp_dist * 8
+            # trail_activate 保持在 tp_dist×1.0（原TP1位置）
             trail_activate = entry_price - tp_dist * 1.0
         else:
-            tp1 = entry_price + tp_dist
-            tp2 = entry_price + tp_dist * 1.5
-            tp3 = entry_price + tp_dist * 2.0
+            tp1 = entry_price + tp_dist * 4
+            tp2 = entry_price + tp_dist * 6
+            tp3 = entry_price + tp_dist * 8
             trail_activate = entry_price + tp_dist * 1.0
 
     score = int(confidence * 0.9) if direction == "bullish" else (-int(confidence * 0.9) if direction == "bearish" else 0)
@@ -498,10 +499,12 @@ def api_backtest():
                 bar_low = low[j]
 
                 if is_bullish:
-                    # Fix6: 追踪止损 — 到达激活价后将止损移至成本价
+                    # 追踪止损 — 到达激活价后将止损移至成本价
                     if trail_activate is not None and bar_high >= trail_activate:
                         sl_price = max(sl_price, entry_price)
-                        # 继续持仓，不移除激活标记
+                    # 到达成本价后，SL 跟随价格（ATR×1.0 追踪）
+                    if sl_price >= entry_price:
+                        sl_price = max(sl_price, bar_high - atr_entry * 1.5)
                     # 先检查止盈
                     if bar_high >= tp_price:
                         exit_price = tp_price
@@ -515,9 +518,12 @@ def api_backtest():
                         break
 
                 elif is_bearish:
-                    # Fix6: 追踪止损
+                    # 追踪止损
                     if trail_activate is not None and bar_low <= trail_activate:
                         sl_price = min(sl_price, entry_price)
+                    # 到达成本价后，SL 跟随价格
+                    if sl_price <= entry_price:
+                        sl_price = min(sl_price, bar_low + atr_entry * 1.5)
                     if bar_low <= tp_price:
                         exit_price = tp_price
                         correct = True; tp_hit = True; exit_reason = "止盈"; break
@@ -535,6 +541,14 @@ def api_backtest():
                     correct = bool(exit_price > entry_price)
                 elif is_bearish:
                     correct = bool(exit_price < entry_price)
+                exit_reason = "超时"
+            else:
+                # 修正：SL触发但盈利 → 追踪止盈
+                if sl_hit:
+                    profit = (exit_price > entry_price) if is_bullish else (exit_price < entry_price)
+                    if profit:
+                        exit_reason = "追踪止盈"
+                        correct = True
 
             # PnL 模拟
             pnl_pct = (exit_price / entry_price - 1) * (1 if is_bullish else -1) * 100
