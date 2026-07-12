@@ -11,7 +11,6 @@ let realtimeMode = false;
 let realtimeStart = 0;
 let realtimeTimer = null;
 let highlightFilter = null; // {type:'reason'|'score', value:'止损'|'止盈'|'时间到'|30|40|...}
-let loadAbort = null; // 用于取消上一次回测请求
 
 // 加载保存的仓位设置
 (function(){

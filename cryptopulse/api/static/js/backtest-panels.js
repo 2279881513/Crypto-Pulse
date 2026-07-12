@@ -1,8 +1,4 @@
 function loadData(){
-    // 取消上一次未完成的请求
-    if(loadAbort){loadAbort.abort();}
-    const ac=new AbortController();
-    loadAbort=ac;
     const lookahead=document.getElementById('sel-lookahead').value;
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
@@ -31,25 +27,25 @@ function loadData(){
         totalEst=Math.max(100,Math.round(days*1440));
     }else{totalEst=10000;}
     // 估算时间：约 800 根/秒
-    var estSec=Math.max(3,Math.round(totalEst/800));
+    var estSec=Math.max(3,Math.round(totalEst/840));
     var startTime=Date.now();
     const barFill=document.querySelector('#progress-overlay .progress-bar-fill');
     const barText=document.getElementById('progress-text');
     document.getElementById('progress-overlay').classList.add('show');
     barFill.style.animation='none';barFill.style.width='0%';
-    barText.textContent='估算 '+totalEst+' 根K线，约 '+estSec+' 秒...';
+    barText.textContent='正在回测 '+startLabel+' ~ '+endLabel+' ...';
     const progTimer=setInterval(function(){
         var el=(Date.now()-startTime)/1000;
         var p=Math.min(95,Math.round(el/estSec*100));
         barFill.style.width=p+'%';
-        var r=Math.max(0,estSec-Math.round(el));
-        if(r>0)barText.textContent='正在处理 '+totalEst+' 根K线 · '+p+'% · 预计剩余 '+r+' 秒';
+        var remaining=Math.max(0,Math.round(estSec-el));
+        barText.textContent='已处理 '+Math.round(el)+' 秒, 预计剩余 '+remaining+' 秒'+(totalEst?', 约 '+totalEst+' 根K线':'');
     },300);
     let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&_t='+Date.now();
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
-    fetch(url,{signal:ac.signal}).then(r=>r.json()).then(d=>{
+    fetch(url).then(r=>r.json()).then(d=>{
         clearInterval(progTimer);
         barFill.style.width='100%';
         barText.textContent='处理完成 ✅';
@@ -72,7 +68,6 @@ function loadData(){
     }).catch(e=>{
         clearInterval(progTimer);
         document.getElementById('progress-overlay').classList.remove('show');
-        if(e.name==='AbortError')return;
         if(reqId!==loadReqId)return;
         info.textContent='❌ '+e.message;
         document.getElementById('load-err').style.display='flex';

@@ -110,9 +110,12 @@ function initDateHistory(){
     const input=document.getElementById('date-range');
     const dropdown=document.getElementById('date-history');
     if(!input||!dropdown)return;
-    input.addEventListener('focus',function(){
+    // 点击输入框切换下拉显示
+    input.addEventListener('click',function(e){
+        e.stopPropagation();
         const history=JSON.parse(localStorage.getItem(DATE_HISTORY_KEY)||'[]');
         if(!history.length){dropdown.style.display='none';return;}
+        if(dropdown.style.display==='block'){dropdown.style.display='none';return;}
         const rect=this.getBoundingClientRect();
         dropdown.style.left=rect.left+'px';
         dropdown.style.top=(rect.bottom+2)+'px';
@@ -126,9 +129,15 @@ function initDateHistory(){
         }).join('')+'<div style="border-top:1px solid #1e2a45;padding:4px 10px"><span style="font-size:10px;color:#525f7a;cursor:pointer" id="dh-clear">清除历史记录</span></div>';
         dropdown.style.display='block';
     });
-    input.addEventListener('blur',function(){setTimeout(()=>{dropdown.style.display='none';},200);});
+    // 点击其他地方关闭
+    document.addEventListener('click',function(e){
+        if(!dropdown.contains(e.target)&&e.target!==input){
+            dropdown.style.display='none';
+        }
+    });
     // 委托点击
     dropdown.addEventListener('click',function(e){
+        e.stopPropagation();
         const item=e.target.closest('.dh-item');
         if(item){selectDateHistory(item.dataset.val);}
         if(e.target.id==='dh-clear'){clearDateHistory();}
