@@ -141,59 +141,139 @@ def index():
 
 
 def _compute_signal(i,close,high,low,openp,vol,
-                     all_ema_f,all_ema_m,all_ema_s,all_macd_hist,all_rsi,
-                     all_bb_upper,all_bb_mid,all_bb_lower,all_atr,all_adx,all_obv,all_vol_ma20,
-                     all_ema_f5=None,all_ema_m5=None,all_ema_s5=None,
-                     all_adx5=None,all_rsi5=None,all_macd_h5=None,c5=None,idx_5m_map=None):
-    """1m+5m双框架评分 — 与回测完全一致"""
-    if i < 199: return None
-    price=close[i]; ema_f=all_ema_f[i]; ema_m=all_ema_m[i]; ema_s=all_ema_s[i]
-    macd_h=all_macd_hist[i]; rsi_v=all_rsi[i]
-    bb_u=all_bb_upper[i]; bb_m=all_bb_mid[i]; bb_l=all_bb_lower[i]
-    adx_v=all_adx[i]; obv_v=all_obv[i]
-    vr=vol[i]/all_vol_ma20[i] if all_vol_ma20[i]>0 else 0
-    idx5=idx_5m_map[i] if idx_5m_map is not None else -1
-    has5=idx5>=0 and all_ema_f5 is not None and not np.isnan(all_ema_f5[idx5])
-    s={}
-    # ---- EMA趋势过滤 + RSI极值入场 ----
-    adx_l=adx_v if not np.isnan(adx_v) else 0
-    d="neutral"; cf=30; total_score=0
-    is_oversold = not np.isnan(rsi_v) and rsi_v <= 30
-    is_ob = not np.isnan(rsi_v) and rsi_v >= 70
-    at_bb_lower = not np.isnan(bb_u) and price <= bb_l + (bb_m - bb_l) * 0.3
-    at_bb_upper = not np.isnan(bb_u) and price >= bb_u - (bb_u - bb_m) * 0.3
-    # 三条EMA排列一致性（更严格的趋势方向判断）
-    ema_bullish = not np.isnan(ema_f) and ema_f > ema_m > ema_s
-    ema_bearish = not np.isnan(ema_f) and ema_f < ema_m < ema_s
-    if is_oversold and at_bb_lower and adx_l >= 10:
-        d="bullish"; total_score=60
-    # 做空：ADX>45时强趋势中不做空（用户数据：仅33%成功率）
-    # 但ADX>50+BB上轨时强趋势豁免做空
-    if d=="neutral" and is_ob and at_bb_upper and adx_l >= 10:
-        if adx_l <= 45 or adx_l > 50:
-            d="bearish"; total_score=-60
-    cf=min(100,max(30,int(55+adx_l*0.5)))
-    if d!="neutral" and cf<35: d="neutral"
-    # === 强趋势方向保护：ADX>45时只允许顺势交易 ===
-    # 防止在强下跌趋势中抄底、强上涨趋势中摸顶
-    # 使用三条EMA排列判断趋势方向（EMA5>EMA13>EMA21=多头，反之为空头）
-    if d != "neutral" and adx_l > 45:
-        if d == "bullish" and not ema_bullish:
-            d = "neutral"
-        elif d == "bearish" and not ema_bearish:
-            d = "neutral"
-    # === 极端趋势保护：ADX>80不开新仓 ===
-    # 极端单边行情中任何入场风险极高
-    if d != "neutral" and adx_l > 80:
-        d = "neutral"
-    rlist=[]
-    if is_oversold: rlist.append("RSI超卖")
-    if is_ob: rlist.append("RSI超买")
-    if at_bb_lower: rlist.append("BB下轨")
-    if at_bb_upper: rlist.append("BB上轨")
-    if adx_l>=35: rlist.append("趋势强")
-    r=",".join(rlist[:4]) if rlist else "中性"
-    return {"direction":d,"score":round(total_score,1),"confidence":cf,"reason":r,"signals":s,"adx_val":adx_l,"rsi_val":rsi_v if not np.isnan(rsi_v) else 50,"at_bb_lower":at_bb_lower,"at_bb_upper":at_bb_upper}
+                     _unused1=None,_unused2=None,_unused3=None,_unused4=None,_unused5=None,
+                     _unused6=None,_unused7=None,_unused8=None,_unused9=None,all_atr=None,_unused10=None,_unused11=None,all_vol_ma20=None,
+                     _unused12=None,_unused13=None,_unused14=None,_unused15=None,_unused16=None,_unused17=None):
+    """
+    价格行为/结构策略 — 基于道氏理论趋势结构 + 支撑阻力突破 + 成交量确认。
+
+    核心逻辑（对应 9:01→9:20 示例）：
+      1. 识别摆动高低点（left=2），远少于传统5，对1m数据更敏感
+      2. 趋势结构：最近2个 pivot high 和 2个 pivot low 共同方向
+      3. 入场：放量破位（>1.5×MA20）+ 趋势结构确认
+      4. 止盈：基于波浪测量返回扩展目标位
+    """
+    LOOKBACK = 30
+    if i < LOOKBACK: return None
+
+    h_slice = high[max(0,i-LOOKBACK):i+1]
+    l_slice = low[max(0,i-LOOKBACK):i+1]
+    c = close[i]; o = openp[i]; h = high[i]; l = low[i]
+
+    # ---- 1. 识别摆动高低点（pivot），left=2 ----
+    left = 2
+    pivots_high = []
+    pivots_low = []
+    for p in range(left, len(h_slice) - left):
+        if h_slice[p] == max(h_slice[p-left:p+left+1]):
+            pivots_high.append((i - LOOKBACK + p, h_slice[p]))
+        if l_slice[p] == min(l_slice[p-left:p+left+1]):
+            pivots_low.append((i - LOOKBACK + p, l_slice[p]))
+
+    # ---- 2. 趋势结构判断（道氏理论）----
+    trend = "neutral"
+    ph_sorted = sorted(pivots_high, key=lambda x: x[0])
+    pl_sorted = sorted(pivots_low, key=lambda x: x[0])
+    if len(ph_sorted) >= 2 and len(pl_sorted) >= 2:
+        last_two_ph = ph_sorted[-2:]
+        last_two_pl = pl_sorted[-2:]
+        ph_higher = last_two_ph[1][1] > last_two_ph[0][1]
+        pl_higher = last_two_pl[1][1] > last_two_pl[0][1]
+        if ph_higher and pl_higher:
+            trend = "uptrend"
+        elif not ph_higher and not pl_higher:
+            trend = "downtrend"
+
+    # ---- 3. 关键价位 ----
+    nearest_resistance = pivots_high[-1][1] if pivots_high else None
+    nearest_support = pivots_low[-1][1] if pivots_low else None
+
+    # ---- 4. 成交量确认（> 1.5 x MA20）----
+    vol_ma20 = all_vol_ma20[i] if all_vol_ma20 is not None and all_vol_ma20[i] > 0 else None
+    vol_ratio = vol[i] / vol_ma20 if vol_ma20 else 1.0
+    vol_confirm = vol_ratio > 1.5
+
+    # ---- 5. 入场信号 ----
+    direction = "neutral"
+    reasons = []
+    confidence = 50
+
+    # 5a. 做空：下降趋势 + 跌破最近支撑 + 放量
+    if trend == "downtrend" and nearest_support is not None and c < nearest_support and vol_confirm:
+        direction = "bearish"
+        confidence = 70
+        if vol_ratio > 2.0:
+            confidence = 75
+        reasons.append("下破支撑 {:.1f}(放量{:.1f}x)".format(nearest_support, vol_ratio))
+
+    # 5b. 做多：上升趋势 + 突破最近阻力 + 放量
+    if direction == "neutral" and trend == "uptrend" and nearest_resistance is not None and c > nearest_resistance and vol_confirm:
+        direction = "bullish"
+        confidence = 70
+        if vol_ratio > 2.0:
+            confidence = 75
+        reasons.append("上破阻力 {:.1f}(放量{:.1f}x)".format(nearest_resistance, vol_ratio))
+
+    # 5c. 回踩确认（反转信号）
+    if direction == "neutral":
+        if nearest_resistance is not None and h >= nearest_resistance and c < nearest_resistance and c < o:
+            direction = "bearish"; confidence = 65
+            reasons.append("回踩阻力 {:.1f} 回落".format(nearest_resistance))
+        if nearest_support is not None and l <= nearest_support and c > nearest_support and c > o:
+            direction = "bullish"; confidence = 65
+            reasons.append("回踩支撑 {:.1f} 反弹".format(nearest_support))
+
+    # 5d. 连续大实体确认（趋势延续）
+    if direction == "neutral" and i >= 1:
+        prev_body = abs(close[i-1] - openp[i-1])
+        cur_body = abs(c - o)
+        avg_price = (c + o) / 2
+        if cur_body / avg_price > 0.002 and prev_body / avg_price > 0.002 and vol_confirm:
+            if c < o and close[i-1] < openp[i-1]:
+                direction = "bearish"; confidence = 60
+                reasons.append("连续放量阴线延续下跌")
+            elif c > o and close[i-1] > openp[i-1]:
+                direction = "bullish"; confidence = 60
+                reasons.append("连续放量阳线延续上涨")
+
+    # ---- 6. 波浪扩展目标位（止盈）----
+    wave_tp1 = None; wave_tp2 = None; wave_tp3 = None
+    if direction == "bearish" and nearest_resistance is not None and nearest_support is not None:
+        wave = nearest_resistance - nearest_support
+        if wave > 0:
+            wave_tp1 = nearest_support - wave
+            wave_tp2 = nearest_support - wave * 1.618
+            wave_tp3 = nearest_support - wave * 2.0
+    elif direction == "bullish" and nearest_support is not None and nearest_resistance is not None:
+        wave = nearest_resistance - nearest_support
+        if wave > 0:
+            wave_tp1 = nearest_resistance + wave
+            wave_tp2 = nearest_resistance + wave * 1.618
+            wave_tp3 = nearest_resistance + wave * 2.0
+
+    # Fallback ATR
+    atr_entry = all_atr[i] if all_atr is not None and not np.isnan(all_atr[i]) else c * 0.005
+    if wave_tp1 is None:
+        rn = 2.0
+        if direction == "bearish":
+            wave_tp1 = c - atr_entry * rn
+            wave_tp2 = c - atr_entry * rn * 1.5
+            wave_tp3 = c - atr_entry * rn * 2.0
+        elif direction == "bullish":
+            wave_tp1 = c + atr_entry * rn
+            wave_tp2 = c + atr_entry * rn * 1.5
+            wave_tp3 = c + atr_entry * rn * 2.0
+
+    score = int(confidence * 0.9) if direction == "bullish" else (-int(confidence * 0.9) if direction == "bearish" else 0)
+
+    result_reason = ";".join(reasons) if reasons else ("上升趋势" if trend == "uptrend" else "下降趋势" if trend == "downtrend" else "盘整")
+
+    return {
+        "direction": direction, "score": score, "confidence": confidence,
+        "reason": result_reason, "trend": trend,
+        "vol_ratio": round(vol_ratio, 2),
+        "wave_tp1": wave_tp1, "wave_tp2": wave_tp2, "wave_tp3": wave_tp3,
+    }
 
 
 @app.route("/api/backtest")
@@ -274,13 +354,10 @@ def api_backtest():
         if len(df) < 100:
             return jsonify({"error": f"所选时间段内数据不足 (需≥200根, 实际{len(df)}根)"}), 503
 
-        # ---- 批量计算信号（一次性算完指标，逐位判信号，比滑窗快 10x+）----
+        # ---- 批量计算信号 ----
         import numpy as np
         from cryptopulse.core.data.models import Direction
-        from cryptopulse.core.indicators.engine import TechnicalSignalEngine
-        from cryptopulse.core.indicators.calculations import (
-            adx, atr, bollinger, emma, macd, obv, rsi, sma,
-        )
+        from cryptopulse.core.indicators.calculations import atr, sma
 
         close = df["close"].values.astype(float)
         high = df["high"].values.astype(float)
@@ -288,43 +365,7 @@ def api_backtest():
         vol = df["volume"].values.astype(float)
         openp = df["open"].values.astype(float)
 
-        engine = TechnicalSignalEngine(style)
-
-        # === 加载 5m 数据做多时间框架分析 ===
-        ts_5m_path = parquet_path.parent / "klines_5m.parquet"
-        df_5m = pd.read_parquet(ts_5m_path) if ts_5m_path.exists() else pd.DataFrame()
-        if not df_5m.empty:
-            df_5m = df_5m.sort_values("timestamp").reset_index(drop=True)
-            c5=df_5m["close"].values.astype(float); h5=df_5m["high"].values.astype(float)
-            l5=df_5m["low"].values.astype(float); v5=df_5m["volume"].values.astype(float)
-            ts5=df_5m["timestamp"].values
-            # 5m 指标
-            all_ema_f5 = emma(c5, engine.ema_fast); all_ema_m5 = emma(c5, engine.ema_mid); all_ema_s5 = emma(c5, engine.ema_slow)
-            all_rsi5 = rsi(c5, engine.rsi_period)
-            all_bb_u5, all_bb_m5, all_bb_l5 = bollinger(c5, engine.bb_period, engine.bb_std)
-            all_adx5 = adx(h5, l5, c5, engine.adx_period)
-            all_macd_l5, all_macd_s5, all_macd_h5 = macd(c5, engine.macd_fast, engine.macd_slow, engine.macd_signal)
-            idx_5m_map = []
-            j = 0
-            for t in df["timestamp"].values:
-                while j < len(ts5) - 1 and ts5[j+1] <= t:
-                    j += 1
-                idx_5m_map.append(j)
-            idx_5m_map = np.array(idx_5m_map)
-        else:
-            idx_5m_map, all_ema_f5, all_ema_m5, all_ema_s5 = None, None, None, None
-            all_rsi5, all_bb_u5, all_bb_m5, all_bb_l5 = None, None, None, None
-            all_adx5, all_macd_h5 = None, None
-        # 一次算出全部指标（向量化）
-        all_ema_f = emma(close, engine.ema_fast)
-        all_ema_m = emma(close, engine.ema_mid)
-        all_ema_s = emma(close, engine.ema_slow)
-        all_macd_line, all_macd_sig, all_macd_hist = macd(close, engine.macd_fast, engine.macd_slow, engine.macd_signal)
-        all_rsi = rsi(close, engine.rsi_period)
-        all_bb_upper, all_bb_mid, all_bb_lower = bollinger(close, engine.bb_period, engine.bb_std)
         all_atr = atr(high, low, close, 14)
-        all_adx = adx(high, low, close, engine.adx_period)
-        all_obv = obv(close, vol)
         all_vol_ma20 = sma(vol, 20)
 
         candles_out = []
@@ -336,10 +377,7 @@ def api_backtest():
         last_trade_idx = -cool_bars
         for i in range(len(df)):
             signal = _compute_signal(i, close, high, low, openp, vol,
-                    all_ema_f, all_ema_m, all_ema_s, all_macd_hist, all_rsi,
-                    all_bb_upper, all_bb_mid, all_bb_lower, all_atr, all_adx, all_obv, all_vol_ma20,
-                    all_ema_f5, all_ema_m5, all_ema_s5,
-                    all_adx5, all_rsi5, all_macd_h5, c5, idx_5m_map)
+                    all_vol_ma20=all_vol_ma20, all_atr=all_atr)
             ts = int(df["timestamp"].iloc[i])
             if signal:
                 all_signals.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
@@ -347,24 +385,7 @@ def api_backtest():
                     # 进场冷却检查
                     dir_now = signal["direction"]
                     if dir_now == last_trade_dir and i - last_trade_idx < cool_bars:
-                        # 强趋势+布林带触边时，冷却期豁免（仍有最小间隔限制）
-                        adx_val = signal.get("adx_val", 0)
-                        sig_bb_lower = signal.get("at_bb_lower", False)
-                        sig_bb_upper = signal.get("at_bb_upper", False)
-                        if adx_val > 50 and (sig_bb_lower or sig_bb_upper):
-                            # 豁免但至少间隔0根K线（阻止同一根K线重复进场）
-                            if i - last_trade_idx >= 1:
-                                signal["cooled"] = False
-                                signal["cooling_exempt"] = True
-                                if trade_start_ms <= 0 or ts >= trade_start_ms:
-                                    signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
-                                    last_trade_dir = dir_now
-                                    last_trade_idx = i
-                            else:
-                                signal["cooled"] = True
-                        else:
-                            # 同方向冷却期内，把当前信号标记为"被冷却跳过"但记录在 all_signals
-                            signal["cooled"] = True
+                        signal["cooled"] = True
                     else:
                         signal["cooled"] = False
                         if trade_start_ms <= 0 or ts >= trade_start_ms:
@@ -385,10 +406,7 @@ def api_backtest():
             for i in range(len(df)):
                 ts = df["timestamp"].iloc[i]
                 sig = _compute_signal(i, close, high, low, openp, vol,
-                    all_ema_f, all_ema_m, all_ema_s, all_macd_hist, all_rsi,
-                    all_bb_upper, all_bb_mid, all_bb_lower, all_atr, all_adx, all_obv, all_vol_ma20,
-                    all_ema_f5, all_ema_m5, all_ema_s5,
-                    all_adx5, all_rsi5, all_macd_h5, c5, idx_5m_map)
+                    all_vol_ma20=all_vol_ma20, all_atr=all_atr)
                 if sig:
                     dir_v = sig["direction"]
                     buf.write(f"{ts},{openp[i]},{high[i]},{low[i]},{close[i]},{vol[i]},{dir_v},{sig['score']},{sig['confidence']},{sig['reason']}\n")
@@ -434,20 +452,24 @@ def api_backtest():
             is_bullish = sig["direction"] == "bullish"
             is_bearish = sig["direction"] == "bearish"
 
-            # ---- 止盈止损: ATR ----
+            # ---- 止损: ATR×1.5, 止盈: 优先波浪测量 ----
             atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else close[idx] * 0.005
-            # 止盈 = 入场价 + n × ATR, 其中n为风险系数(通常2-3)
+            # 止损统一用 ATR×1.5
             risk_n = 2.0
             sl_mult = 1.5
-            tp_mult = risk_n
             if is_bullish:
                 sl_price = entry_price - atr_entry * sl_mult
                 sl_init = sl_price
-                tp_price = entry_price + atr_entry * tp_mult
+                # 止盈优先使用信号返回的波浪目标位
+                tp_price = sig.get("wave_tp1")
+                if tp_price is None or tp_price <= entry_price:
+                    tp_price = entry_price + atr_entry * risk_n
             elif is_bearish:
                 sl_price = entry_price + atr_entry * sl_mult
                 sl_init = sl_price
-                tp_price = entry_price - atr_entry * tp_mult
+                tp_price = sig.get("wave_tp1")
+                if tp_price is None or tp_price >= entry_price:
+                    tp_price = entry_price - atr_entry * risk_n
             else:
                 sl_price = entry_price
                 tp_price = entry_price
@@ -524,6 +546,7 @@ def api_backtest():
                 "lookahead": lookahead,
                 "correct": correct,
                 "pnl_pct": round(pnl_pct, 2),
+                "risk_n": risk_n,
                 "exit_reason": exit_reason,
             })
             # 更新连续亏损计数（用于连续亏损保护）
@@ -535,7 +558,7 @@ def api_backtest():
                 cons_losses[dir_str] += 1
                 cons_losses[other_dir] = 0  # 另一方归零
 
-        # ---- 实时模式过滤：只统计 trade_start 之后的交易 ----
+        # ---- 更新连续亏损计数 ----
         # ---- 汇总统计 ----
         total_trades = len(trades)
         correct_trades = sum(1 for t in trades if t["correct"])
@@ -603,7 +626,6 @@ def api_backtest():
                 s = sig.get("signals", {}) or {}
                 p = close[idx]
                 atr_v = all_atr[idx] if not np.isnan(all_atr[idx]) else 0
-                adx_v = all_adx[idx] if not np.isnan(all_adx[idx]) else 20
                 vr = vol[idx] / all_vol_ma20[idx] if all_vol_ma20[idx] > 0 else 1
                 hr = time.gmtime(sr["ts"] / 1000).tm_hour
                 is_dir = sig["direction"] != "neutral"
