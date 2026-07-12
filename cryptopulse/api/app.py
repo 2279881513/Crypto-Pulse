@@ -145,13 +145,12 @@ def _compute_signal(i,close,high,low,openp,vol,
                      _unused6=None,_unused7=None,_unused8=None,_unused9=None,all_atr=None,_unused10=None,_unused11=None,all_vol_ma20=None,
                      _unused12=None,_unused13=None,_unused14=None,_unused15=None,_unused16=None,_unused17=None):
     """
-    价格行为/结构策略 — 基于道氏理论趋势结构 + 支撑阻力突破 + 成交量确认。
-
-    核心逻辑（对应 9:01→9:20 示例）：
-      1. 识别摆动高低点（left=2），远少于传统5，对1m数据更敏感
-      2. 趋势结构：最近2个 pivot high 和 2个 pivot low 共同方向
-      3. 入场：放量破位（>1.5×MA20）+ 趋势结构确认
-      4. 止盈：基于波浪测量返回扩展目标位
+    价格行为/结构策略 v2 — Deepseek 优化版
+    Fix1: TP = max(波幅, ATR×2.0) 确保盈亏比 >= 1.33
+    Fix2: 入场价 = pivot价位（模拟挂单突破），不等收盘
+    Fix3: left=3 减少噪音假突破
+    Fix4: 破位K线收盘位置过滤 + 跟随K线确认
+    Fix6: 返回追踪止损参考位
     """
     LOOKBACK = 30
     if i < LOOKBACK: return None
@@ -160,8 +159,8 @@ def _compute_signal(i,close,high,low,openp,vol,
     l_slice = low[max(0,i-LOOKBACK):i+1]
     c = close[i]; o = openp[i]; h = high[i]; l = low[i]
 
-    # ---- 1. 识别摆动高低点（pivot），left=2 ----
-    left = 2
+    # Fix3: left=3 减少噪音
+    left = 3
     pivots_high = []
     pivots_low = []
     for p in range(left, len(h_slice) - left):
@@ -170,7 +169,7 @@ def _compute_signal(i,close,high,low,openp,vol,
         if l_slice[p] == min(l_slice[p-left:p+left+1]):
             pivots_low.append((i - LOOKBACK + p, l_slice[p]))
 
-    # ---- 2. 趋势结构判断（道氏理论）----
+    # ---- 趋势结构 ----
     trend = "neutral"
     ph_sorted = sorted(pivots_high, key=lambda x: x[0])
     pl_sorted = sorted(pivots_low, key=lambda x: x[0])
@@ -184,95 +183,117 @@ def _compute_signal(i,close,high,low,openp,vol,
         elif not ph_higher and not pl_higher:
             trend = "downtrend"
 
-    # ---- 3. 关键价位 ----
+    # ---- 关键价位 ----
     nearest_resistance = pivots_high[-1][1] if pivots_high else None
     nearest_support = pivots_low[-1][1] if pivots_low else None
 
-    # ---- 4. 成交量确认（> 1.5 x MA20）----
+    # ---- 成交量确认 ----
     vol_ma20 = all_vol_ma20[i] if all_vol_ma20 is not None and all_vol_ma20[i] > 0 else None
     vol_ratio = vol[i] / vol_ma20 if vol_ma20 else 1.0
     vol_confirm = vol_ratio > 1.5
 
-    # ---- 5. 入场信号 ----
+    # ---- ATR 参考 ----
+    atr_v = all_atr[i] if all_atr is not None and not np.isnan(all_atr[i]) else (c * 0.005)
+
+    # ---- 入场信号 ----
     direction = "neutral"
     reasons = []
     confidence = 50
+    entry_price = None  # Fix2: 入场价放pivot位（挂单突破）
 
-    # 5a. 做空：下降趋势 + 跌破最近支撑 + 放量
-    if trend == "downtrend" and nearest_support is not None and c < nearest_support and vol_confirm:
+    # Fix4: 破位K线收盘位置过滤
+    # 做空：收盘在K线下半部分（实体>影线），证明空方主导
+    bear_candle_ok = (c < o) and ((o - c) > (h - l) * 0.5)
+    # 做多：收盘在K线上半部分
+    bull_candle_ok = (c > o) and ((c - o) > (h - l) * 0.5)
+
+    # 5a. 做空：下降趋势 + 跌破最近支撑 + 放量 + 空方K线
+    if trend == "downtrend" and nearest_support is not None and c < nearest_support and vol_confirm and bear_candle_ok:
         direction = "bearish"
         confidence = 70
-        if vol_ratio > 2.0:
-            confidence = 75
+        if vol_ratio > 2.0: confidence = 75
+        # Fix2: 入场价在支撑位（挂单突破）
+        entry_price = nearest_support
         reasons.append("下破支撑 {:.1f}(放量{:.1f}x)".format(nearest_support, vol_ratio))
 
-    # 5b. 做多：上升趋势 + 突破最近阻力 + 放量
-    if direction == "neutral" and trend == "uptrend" and nearest_resistance is not None and c > nearest_resistance and vol_confirm:
+    # 5b. 做多：上升趋势 + 突破最近阻力 + 放量 + 多方K线
+    if direction == "neutral" and trend == "uptrend" and nearest_resistance is not None and c > nearest_resistance and vol_confirm and bull_candle_ok:
         direction = "bullish"
         confidence = 70
-        if vol_ratio > 2.0:
-            confidence = 75
+        if vol_ratio > 2.0: confidence = 75
+        entry_price = nearest_resistance
         reasons.append("上破阻力 {:.1f}(放量{:.1f}x)".format(nearest_resistance, vol_ratio))
 
-    # 5c. 回踩确认（反转信号）
+    # 5c. 回踩确认
     if direction == "neutral":
         if nearest_resistance is not None and h >= nearest_resistance and c < nearest_resistance and c < o:
             direction = "bearish"; confidence = 65
+            entry_price = nearest_resistance
             reasons.append("回踩阻力 {:.1f} 回落".format(nearest_resistance))
         if nearest_support is not None and l <= nearest_support and c > nearest_support and c > o:
             direction = "bullish"; confidence = 65
+            entry_price = nearest_support
             reasons.append("回踩支撑 {:.1f} 反弹".format(nearest_support))
 
-    # 5d. 连续大实体确认（趋势延续）
-    if direction == "neutral" and i >= 1:
+    # 5d. 连续实体（趋势延续）- 此时用收盘价入场
+    if direction == "neutral" and i >= 2:
+        # Fix4: 跟随K线确认 — 前一根确认破位，这根跟着走
         prev_body = abs(close[i-1] - openp[i-1])
-        cur_body = abs(c - o)
-        avg_price = (c + o) / 2
-        if cur_body / avg_price > 0.002 and prev_body / avg_price > 0.002 and vol_confirm:
-            if c < o and close[i-1] < openp[i-1]:
+        prev2_body = abs(close[i-2] - openp[i-2])
+        avg_price = (c + o + close[i-1] + openp[i-1]) / 4
+        if prev_body / avg_price > 0.002 and prev2_body / avg_price > 0.002:
+            # 连续3根阴线（含当前）+ 放量
+            if close[i-2] < openp[i-2] and close[i-1] < openp[i-1] and bear_candle_ok and vol_confirm:
                 direction = "bearish"; confidence = 60
-                reasons.append("连续放量阴线延续下跌")
-            elif c > o and close[i-1] > openp[i-1]:
+                entry_price = c  # 连续确认用收盘价
+                reasons.append("连续实体阴线延续下跌")
+            elif close[i-2] > openp[i-2] and close[i-1] > openp[i-1] and bull_candle_ok and vol_confirm:
                 direction = "bullish"; confidence = 60
-                reasons.append("连续放量阳线延续上涨")
+                entry_price = c
+                reasons.append("连续实体阳线延续上涨")
 
-    # ---- 6. 波浪扩展目标位（止盈）----
-    wave_tp1 = None; wave_tp2 = None; wave_tp3 = None
-    if direction == "bearish" and nearest_resistance is not None and nearest_support is not None:
-        wave = nearest_resistance - nearest_support
-        if wave > 0:
-            wave_tp1 = nearest_support - wave
-            wave_tp2 = nearest_support - wave * 1.618
-            wave_tp3 = nearest_support - wave * 2.0
-    elif direction == "bullish" and nearest_support is not None and nearest_resistance is not None:
-        wave = nearest_resistance - nearest_support
-        if wave > 0:
-            wave_tp1 = nearest_resistance + wave
-            wave_tp2 = nearest_resistance + wave * 1.618
-            wave_tp3 = nearest_resistance + wave * 2.0
-
-    # Fallback ATR
-    atr_entry = all_atr[i] if all_atr is not None and not np.isnan(all_atr[i]) else c * 0.005
-    if wave_tp1 is None:
-        rn = 2.0
-        if direction == "bearish":
-            wave_tp1 = c - atr_entry * rn
-            wave_tp2 = c - atr_entry * rn * 1.5
-            wave_tp3 = c - atr_entry * rn * 2.0
-        elif direction == "bullish":
-            wave_tp1 = c + atr_entry * rn
-            wave_tp2 = c + atr_entry * rn * 1.5
-            wave_tp3 = c + atr_entry * rn * 2.0
+    # ---- Fix1: 止盈 = max(波幅, ATR×2.0) 确保盈亏比 ----
+    # Fix6: 返回追踪止损参考位
+    tp1 = None; tp2 = None; tp3 = None; trail_activate = None
+    
+    if direction in ("bearish", "bullish") and entry_price is not None:
+        is_short = direction == "bearish"
+        # 波幅距离
+        wave_dist = None
+        if nearest_resistance is not None and nearest_support is not None:
+            wave_dist = nearest_resistance - nearest_support
+        # ATR 距离（保底）
+        atr_dist = atr_v * 2.0
+        
+        # Fix1: TP距离 = max(波幅, ATR×2.0)
+        if wave_dist is not None and wave_dist > 0:
+            tp_dist = max(wave_dist, atr_dist)
+        else:
+            tp_dist = atr_dist
+        
+        if is_short:
+            tp1 = entry_price - tp_dist
+            tp2 = entry_price - tp_dist * 1.5
+            tp3 = entry_price - tp_dist * 2.0
+            # Fix6: 到达TP1后将止损移至成本价
+            trail_activate = entry_price - tp_dist * 1.0
+        else:
+            tp1 = entry_price + tp_dist
+            tp2 = entry_price + tp_dist * 1.5
+            tp3 = entry_price + tp_dist * 2.0
+            trail_activate = entry_price + tp_dist * 1.0
 
     score = int(confidence * 0.9) if direction == "bullish" else (-int(confidence * 0.9) if direction == "bearish" else 0)
-
     result_reason = ";".join(reasons) if reasons else ("上升趋势" if trend == "uptrend" else "下降趋势" if trend == "downtrend" else "盘整")
 
     return {
         "direction": direction, "score": score, "confidence": confidence,
         "reason": result_reason, "trend": trend,
         "vol_ratio": round(vol_ratio, 2),
-        "wave_tp1": wave_tp1, "wave_tp2": wave_tp2, "wave_tp3": wave_tp3,
+        "entry_price": entry_price,
+        "tp1": tp1, "tp2": tp2, "tp3": tp3,
+        "trail_activate": trail_activate,
+        "nearest_support": nearest_support, "nearest_resistance": nearest_resistance,
     }
 
 
@@ -423,7 +444,7 @@ def api_backtest():
         for sr in signals_raw:
             idx = sr["idx"]
             sig = sr["sig"]
-            entry_price = sr["price"]
+            entry_price = sig.get("entry_price") or sr["price"]  # Fix2: 优先用信号返回的pivot入场价
             entry_ts = sr["ts"]
             dir_str = sig.get("direction", "")
 
@@ -452,24 +473,20 @@ def api_backtest():
             is_bullish = sig["direction"] == "bullish"
             is_bearish = sig["direction"] == "bearish"
 
-            # ---- 止损: ATR×1.5, 止盈: 优先波浪测量 ----
+            # ---- 止损: ATR×1.5, 止盈: 信号返回的tp1（已按 fix1 优化）----
             atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else close[idx] * 0.005
-            # 止损统一用 ATR×1.5
-            risk_n = 2.0
             sl_mult = 1.5
             if is_bullish:
                 sl_price = entry_price - atr_entry * sl_mult
                 sl_init = sl_price
-                # 止盈优先使用信号返回的波浪目标位
-                tp_price = sig.get("wave_tp1")
-                if tp_price is None or tp_price <= entry_price:
-                    tp_price = entry_price + atr_entry * risk_n
+                # tp1 来自信号（= max(波幅, ATR×2.0)），有保底
+                tp_price = sig.get("tp1") or (entry_price + atr_entry * 2.0)
+                trail_activate = sig.get("trail_activate") or (entry_price + atr_entry * 2.0)
             elif is_bearish:
                 sl_price = entry_price + atr_entry * sl_mult
                 sl_init = sl_price
-                tp_price = sig.get("wave_tp1")
-                if tp_price is None or tp_price >= entry_price:
-                    tp_price = entry_price - atr_entry * risk_n
+                tp_price = sig.get("tp1") or (entry_price - atr_entry * 2.0)
+                trail_activate = sig.get("trail_activate") or (entry_price - atr_entry * 2.0)
             else:
                 sl_price = entry_price
                 tp_price = entry_price
@@ -499,6 +516,10 @@ def api_backtest():
                 bar_low = low[j]
 
                 if is_bullish:
+                    # Fix6: 追踪止损 — 到达激活价后将止损移至成本价
+                    if trail_activate is not None and bar_high >= trail_activate:
+                        sl_price = max(sl_price, entry_price)
+                        # 继续持仓，不移除激活标记
                     # 先检查止盈
                     if bar_high >= tp_price:
                         exit_price = tp_price
@@ -512,6 +533,9 @@ def api_backtest():
                         break
 
                 elif is_bearish:
+                    # Fix6: 追踪止损
+                    if trail_activate is not None and bar_low <= trail_activate:
+                        sl_price = min(sl_price, entry_price)
                     if bar_low <= tp_price:
                         exit_price = tp_price
                         correct = True; tp_hit = True; exit_reason = "止盈"; break
@@ -546,7 +570,7 @@ def api_backtest():
                 "lookahead": lookahead,
                 "correct": correct,
                 "pnl_pct": round(pnl_pct, 2),
-                "risk_n": risk_n,
+                "risk_n": 2.0,
                 "exit_reason": exit_reason,
             })
             # 更新连续亏损计数（用于连续亏损保护）
@@ -682,19 +706,9 @@ def api_backtest():
                     "pnl_pct": pnl_pct,
                     "保本": "未触发" if fee_triggered else "",
                     "#": n,
-                    "ema": round(s.get("ema", 0), 2),
-                    "momentum": round(s.get("momentum", 0), 2),
-                    "macd": round(s.get("macd", 0), 2),
-                    "rsi_val": round(sig.get("rsi_val", 50), 1),
-                    "rsi_score": round(s.get("rsi", 0), 2),
-                    "bb": round(s.get("bollinger", 0), 2),
                     "vol_ratio": round(vr, 2),
-                    "vol_score": round(s.get("volume", 0), 2),
-                    "obv_score": round(s.get("obv", 0), 2),
-                    "micro": round(s.get("micro", 0), 2),
-                    "adx": round(adx_v, 1),
                     "atr": round(atr_v, 2),
-                    "adx_category": "强趋势" if adx_v >= 35 else ("中趋势" if adx_v >= 25 else ("弱趋势" if adx_v >= 20 else "无趋势")),
+                    "trend": sig.get("trend", ""),
                     "price_trend": "up" if p > openp[idx] else "down",
                     "hour_of_day": hr,
                 }
@@ -726,7 +740,7 @@ def api_backtest():
             b.write("【信号明细】\n")
             cols = ["#","time","price","open","high","low","volume","direction","score","confidence","reason",
                     "entry_price","sl_price","exit_price","exit_reason","correct","pnl_pct","保本",
-                    "rsi_val","rsi_score","bb","adx","atr","adx_category","风控原因"]
+                    "atr","vol_ratio","trend","风控原因"]
             # 为每条信号添加风控原因（回测中检测是否在冷却期内）
             for row in sig_rows:
                 if row.get("direction") in ("bullish", "bearish"):
