@@ -1,4 +1,8 @@
 function loadData(){
+    // 取消上一次未完成的请求
+    if(loadAbort){loadAbort.abort();}
+    const ac=new AbortController();
+    loadAbort=ac;
     const lookahead=document.getElementById('sel-lookahead').value;
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
@@ -45,7 +49,7 @@ function loadData(){
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
-    fetch(url).then(r=>r.json()).then(d=>{
+    fetch(url,{signal:ac.signal}).then(r=>r.json()).then(d=>{
         clearInterval(progTimer);
         barFill.style.width='100%';
         barText.textContent='处理完成 ✅';
@@ -68,6 +72,7 @@ function loadData(){
     }).catch(e=>{
         clearInterval(progTimer);
         document.getElementById('progress-overlay').classList.remove('show');
+        if(e.name==='AbortError')return;
         if(reqId!==loadReqId)return;
         info.textContent='❌ '+e.message;
         document.getElementById('load-err').style.display='flex';
