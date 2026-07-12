@@ -225,16 +225,6 @@ def _compute_signal(i,close,high,low,openp,vol,
         reasons.append("上破阻力 {:.1f}(放量{:.1f}x)".format(nearest_resistance, vol_ratio))
 
     # 5c. 回踩确认
-    if direction == "neutral":
-        if nearest_resistance is not None and h >= nearest_resistance and c < nearest_resistance and c < o:
-            direction = "bearish"; confidence = 65
-            entry_price = nearest_resistance
-            reasons.append("回踩阻力 {:.1f} 回落".format(nearest_resistance))
-        if nearest_support is not None and l <= nearest_support and c > nearest_support and c > o:
-            direction = "bullish"; confidence = 65
-            entry_price = nearest_support
-            reasons.append("回踩支撑 {:.1f} 反弹".format(nearest_support))
-
     # 5d. 连续实体（趋势延续）- 此时用收盘价入场
     if direction == "neutral" and i >= 2:
         # Fix4: 跟随K线确认 — 前一根确认破位，这根跟着走
@@ -484,6 +474,7 @@ def api_backtest():
                 sl_init = entry_price
 
             # ---- 保本检查：TP1利润必须高于手续费才值得进场 ----
+            # ---- 保本检查：TP1利润必须≥0.10%才值得进场 ----
             fee_cost_pct = fee_rate * 2 * 100  # 双边手续费百分比
             if is_bullish:
                 tp1_pct = (tp_price / entry_price - 1) * 100
@@ -493,7 +484,7 @@ def api_backtest():
                 tp1_pct = 0
             if tp1_pct <= fee_cost_pct:
                 sig["risk_blocked"] = True
-                sig["risk_reason"] = "TP1利润不足覆盖手续费"
+                sig["risk_reason"] = "TP1利润不足"
                 continue
 
             # ---- 验证出场（止损/止盈/超时） ----
