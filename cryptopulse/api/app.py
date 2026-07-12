@@ -395,10 +395,7 @@ def api_backtest():
         candles_out = []
         signals_raw = []
         all_signals = []  # 所有信号（含观望）
-        # 进场冷却：同一方向连续信号间隔不足 cool_bars 根 K 线时跳过
-        cool_bars = 2  # 冷却K线数：至少间隔1根K线（原为1导致连续逆势进场）
-        last_trade_dir = None
-        last_trade_idx = -cool_bars
+        all_signals = []  # 所有信号（含观望）
         for i in range(len(df)):
             signal = _compute_signal(i, close, high, low, openp, vol,
                     all_vol_ma20=all_vol_ma20, all_atr=all_atr)
@@ -406,16 +403,8 @@ def api_backtest():
             if signal:
                 all_signals.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
                 if signal["direction"] != "neutral":
-                    # 进场冷却检查
-                    dir_now = signal["direction"]
-                    if dir_now == last_trade_dir and i - last_trade_idx < cool_bars:
-                        signal["cooled"] = True
-                    else:
-                        signal["cooled"] = False
-                        if trade_start_ms <= 0 or ts >= trade_start_ms:
-                            signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
-                            last_trade_dir = dir_now
-                            last_trade_idx = i
+                    if trade_start_ms <= 0 or ts >= trade_start_ms:
+                        signals_raw.append({"idx": i, "sig": signal, "price": close[i], "ts": ts})
             if not csv_export:
                 candles_out.append({
                     "t": ts,
@@ -585,12 +574,7 @@ def api_backtest():
                 cons_losses[other_dir] = 0  # 另一方归零
 
         # ---- 传播风控标记到所有信号（用于K线图橙色箭头）----
-        for item in all_signals:
-            sig = item["sig"]
-            if sig.get("cooled"):
-                sig["risk_blocked"] = True
-                sig["risk_reason"] = "同方向冷却间隔不足"
-            # 已在回测循环中被设置为risk_blocked的信号保持原样
+        # 已在回测循环中被设置为risk_blocked的信号保持原样
 
         # ---- 更新连续亏损计数 ----
         # ---- 汇总统计 ----

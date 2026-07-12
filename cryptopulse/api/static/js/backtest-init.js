@@ -24,6 +24,7 @@ let loadCount = 0; // 回测次数统计
         if(s.feeRate)document.getElementById('pos-fee').value=s.feeRate;
         if(s.slCooldownMin)document.getElementById('sl-cooldown-min').value=s.slCooldownMin;
         if(s.slCooldownEnabled!==undefined)document.getElementById('chk-sl-cooldown').checked=s.slCooldownEnabled;
+        if(s.feeFilterEnabled!==undefined)document.getElementById('chk-fee-filter').checked=s.feeFilterEnabled;
     }catch(e){}
 })();
 

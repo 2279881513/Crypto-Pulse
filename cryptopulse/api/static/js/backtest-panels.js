@@ -144,7 +144,7 @@ function updateNetPnl(){
 function fmtPct(a,b){try{var r=((Number(a)/Number(b))-1)*100;return isNaN(r)?'':(r>=0?'+':'')+r.toFixed(2)+'%'}catch(e){return''}}
 
 // ===== 仓位管理 =====
-['pos-capital','pos-leverage','pos-fee'].forEach(id=>{
+['pos-capital','pos-leverage','pos-fee','chk-fee-filter','chk-sl-cooldown','sl-cooldown-min'].forEach(id=>{
     const el=document.getElementById(id);
     if(el)el.addEventListener('change',()=>{
         localStorage.setItem('cryptopulse_settings',JSON.stringify({
@@ -153,6 +153,7 @@ function fmtPct(a,b){try{var r=((Number(a)/Number(b))-1)*100;return isNaN(r)?'':
             feeRate:document.getElementById('pos-fee').value,
             slCooldownMin:document.getElementById('sl-cooldown-min').value,
             slCooldownEnabled:document.getElementById('chk-sl-cooldown').checked,
+            feeFilterEnabled:document.getElementById('chk-fee-filter').checked,
         }));
         // 更新净利显示
         if(typeof stats!=='undefined'&&stats&&stats.total_trades){
@@ -168,6 +169,12 @@ function fmtPct(a,b){try{var r=((Number(a)/Number(b))-1)*100;return isNaN(r)?'':
             else el.innerHTML='<span style="color:#e74c3c">净利 -$'+Math.abs(net).toFixed(0)+' ROI '+roi.toFixed(1)+'%</span>';
         }
     });
+});
+
+// 冷却开关/时间变化时自动重新回测
+['chk-sl-cooldown','sl-cooldown-min'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el)el.addEventListener('change',()=>{if(typeof loadData==='function')loadData();});
 });
 
 function updatePosPanel(){
@@ -345,9 +352,11 @@ function renderChart(keepZoom){
                 const dir=c.s.direction==='bullish';
                 markers.push({time:t,position:dir?'belowBar':'aboveBar',color:'#525f7a',shape:dir?'arrowUp':'arrowDown',text:'',size:1.2});
             }else if(isRiskBlocked(c)){
-                // 风控阻止：做多被阻→橙色向上箭头，做空被阻→橙色向下箭头
+                // 风控阻止：利润不足→💰，其他风控→⛔
                 const dir=c.s.direction==='bullish';
-                markers.push({time:t,position:dir?'belowBar':'aboveBar',color:'#ff9800',shape:dir?'arrowUp':'arrowDown',text:'⛔',size:1.2});
+                const isProfit = c.s.risk_reason && c.s.risk_reason.indexOf('利润不足')>=0;
+                const icon = isProfit ? '💰' : '⛔';
+                markers.push({time:t,position:dir?'belowBar':'aboveBar',color:'#ff9800',shape:dir?'arrowUp':'arrowDown',text:icon,size:1.2});
             }else{
                 markers.push({time:t,position:'inBar',color:'#525f7a',shape:'diamond',text:'',size:0.6});
             }
