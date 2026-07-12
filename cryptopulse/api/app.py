@@ -198,6 +198,7 @@ def _compute_signal(i,close,high,low,openp,vol,
 def api_backtest():
     """回测分析 API — 从本地 Parquet 读取历史数据，支持指定时间段"""
     try:
+        print(f"[回测] 开始处理请求, style={request.args.get('style','?')}, lookahead={request.args.get('lookahead','?')}, start={request.args.get('start','?')[:20]}, end={request.args.get('end','?')[:20]}", file=sys.stderr)
         symbol = os.environ.get("SYMBOL", "BTC-USDT")
         style = request.args.get("style", "short_term")
         lookahead = request.args.get("lookahead", 480, type=int)
@@ -789,4 +790,4 @@ def api_risk_clear_sl():
 
 if __name__ == "__main__":
     print(f"[CryptoPulse] Starting on http://0.0.0.0:8080")
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=8080, debug=True, threaded=True)

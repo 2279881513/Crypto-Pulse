@@ -86,7 +86,7 @@ function exportCSV(){
             +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?tr.exit_reason:'')+'</td>'
             +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?(tr.correct?'Y':'N'):'')+'</td>'
             +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?((tr.pnl_pct>=0?'+':'')+tr.pnl_pct+'%'):'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?'':'未触发')+'</td>'
+            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?(Math.abs(tr.pnl_pct)>=fee*2*100?'已触发':'未触发'):'')+'</td>'
             +'<td style="border:1px solid #ccc;padding:2px 4px">'+(t.risk_reason||'')+'</td>'
             +'</tr>';
     });

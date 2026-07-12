@@ -1,4 +1,22 @@
 function loadData(){
+    // 非首次回测：保存参数后刷新页面，避免浏览器连接池耗尽
+    if(loadCount>0){
+        const params={style:currentStyle,lookahead:document.getElementById('sel-lookahead').value,start:document.getElementById('sel-start').value,end:document.getElementById('sel-end').value,dateRange:document.getElementById('date-range').value};
+        sessionStorage.setItem('bk_params',JSON.stringify(params));
+        location.reload();
+        return;
+    }
+    loadCount++;
+    // 停止自动刷新定时器，避免干扰
+    if(latestTimer){clearInterval(latestTimer);latestTimer=null;}
+    if(realtimeTimer){clearInterval(realtimeTimer);realtimeTimer=null;}
+    // 取消上一次请求，释放连接
+    if(loadAbort){
+        try{loadAbort.abort();}catch(e){}
+        loadAbort=null;
+    }
+    const ac=new AbortController();
+    loadAbort=ac;
     const lookahead=document.getElementById('sel-lookahead').value;
     const start=document.getElementById('sel-start').value;
     const end=document.getElementById('sel-end').value;
@@ -32,26 +50,41 @@ function loadData(){
     const barFill=document.querySelector('#progress-overlay .progress-bar-fill');
     const barText=document.getElementById('progress-text');
     document.getElementById('progress-overlay').classList.add('show');
+    // 清除上一次的进度条定时器
+    if(progTimer)clearInterval(progTimer);
     barFill.style.animation='none';barFill.style.width='0%';
     barText.textContent='正在回测 '+startLabel+' ~ '+endLabel+' ...';
-    const progTimer=setInterval(function(){
+    progTimer=setInterval(function(){
         var el=(Date.now()-startTime)/1000;
         var p=Math.min(95,Math.round(el/estSec*100));
         barFill.style.width=p+'%';
         var remaining=Math.max(0,Math.round(estSec-el));
-        barText.textContent='已处理 '+Math.round(el)+' 秒, 预计剩余 '+remaining+' 秒'+(totalEst?', 约 '+totalEst+' 根K线':'');
+        if(el>estSec*3){
+            barText.textContent='⏳ 已处理 '+Math.round(el)+' 秒, 超出预计时间, 请查看后端控制台是否有报错';
+        }else{
+            barText.textContent='已处理 '+Math.round(el)+' 秒, 预计剩余 '+remaining+' 秒'+(totalEst?', 约 '+totalEst+' 根K线':'');
+        }
     },300);
     let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&_t='+Date.now();
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
-    fetch(url).then(r=>r.json()).then(d=>{
+    // 设置请求超时（超过300秒自动取消）
+    const timeoutId=setTimeout(()=>ac.abort(), 300000);
+    const xhr=new XMLHttpRequest();
+    xhr.open('GET',url,true);
+    xhr.responseType='json';
+    xhr.onload=function(){
+        clearTimeout(timeoutId);
         clearInterval(progTimer);
+        // 释放旧数据
+        candles=[];trades=[];stats=null;allSignals=[];
         barFill.style.width='100%';
         barText.textContent='处理完成 ✅';
         setTimeout(()=>{document.getElementById('progress-overlay').classList.remove('show');},300);
         if(reqId!==loadReqId)return;
-        if(d.error){document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=d.error;info.textContent='❌ '+d.error;return}
+        const d=xhr.response;
+        if(!d||d.error){document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').textContent=(d?d.error:'空响应');info.textContent='❌ '+(d?d.error:'空响应');return}
         candles=d.candles||[];trades=d.trades||[];stats=d.stats||{};allSignals=d.all_signals||[];window._cdZones=d.sl_cooldown_zones||[];
         lastPrediction=d.prediction||null;
         renderChart();renderStats();renderTable();renderDistChart();
@@ -65,14 +98,11 @@ function loadData(){
             document.getElementById('btn-histpred').style.borderColor='#667eea';
             document.getElementById('btn-histpred').style.color='#667eea';
         }
-    }).catch(e=>{
-        clearInterval(progTimer);
-        document.getElementById('progress-overlay').classList.remove('show');
-        if(reqId!==loadReqId)return;
-        info.textContent='❌ '+e.message;
-        document.getElementById('load-err').style.display='flex';
-        document.getElementById('err-detail').textContent=e.message;
-    });
+    };
+    xhr.onerror=function(){clearInterval(progTimer);clearTimeout(timeoutId);document.getElementById('progress-overlay').classList.remove('show');if(reqId!==loadReqId)return;info.textContent='❌ 网络错误, 请刷新页面重试';document.getElementById('load-err').style.display='flex';document.getElementById('err-detail').innerHTML='网络请求失败<br><br>可能原因:<br>1. 服务器连接数已满<br>2. 浏览器连接池耗尽<br>3. 请<button onclick="location.reload()" style="padding:2px 8px;border:none;border-radius:3px;background:#667eea;color:#fff;cursor:pointer">刷新页面</button>后重试';};
+    xhr.onabort=function(){clearInterval(progTimer);clearTimeout(timeoutId);document.getElementById('progress-overlay').classList.remove('show');};
+    ac.signal.addEventListener('abort',function(){xhr.abort();});
+    xhr.send();
 }
 
 // ===== 费用过滤：过滤利润不够扣手续费的低质量信号 =====

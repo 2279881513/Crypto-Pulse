@@ -41,9 +41,9 @@
         <button class="btn-s" id="btn-realtime" onclick="toggleRealtime()" style="background:#1e2a45;color:#8892b0">🔄 实时</button>
         <span>验证</span>
         <select id="sel-lookahead" style="width:45px">
-            <option value="5" selected>5</option>
+            <option value="5">5</option>
             <option value="10">10</option>
-            <option value="20">20</option>
+            <option value="20" selected>20</option>
             <option value="30">30</option>
         </select>
         <button id="btn-histpred" class="btn-r" onclick="toggleHistPred()" style="background:transparent;border:1px solid #525f7a;font-size:10px;color:#525f7a">📊 预测</button>
@@ -98,7 +98,7 @@
         <input id="pos-leverage" type="text" inputmode="numeric" value="1" style="width:34px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 4px;font-size:10px;font-family:'Courier New',monospace;outline:none">
         <span style="font-size:9px;color:#525f7a">费</span>
         <select id="pos-fee" style="width:46px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 2px;font-size:9px;outline:none">
-            <option value="0.0005">0.05%</option><option value="0.0002" selected>0.02%</option><option value="0.001">0.10%</option>
+            <option value="0.0005" selected>0.05%</option><option value="0.0002">0.02%</option><option value="0.001">0.10%</option>
         </select>
         <label style="font-size:9px;color:#525f7a;cursor:pointer;display:flex;align-items:center;gap:2px" title="过滤掉利润不够扣手续费的低质量信号">
             <input type="checkbox" id="chk-fee-filter" checked style="width:10px;height:10px;cursor:pointer">保本

@@ -118,3 +118,19 @@ function setRiskHighlight(reason) {
 initChart();
 setTimeout(fetchRiskStatus, 500);
 setInterval(fetchRiskStatus, 10000);
+
+// 检查是否有待执行的回测参数（页面刷新后自动开始）
+(function(){
+    const saved=sessionStorage.getItem('bk_params');
+    if(saved){
+        sessionStorage.removeItem('bk_params');
+        try{
+            const p=JSON.parse(saved);
+            if(p.dateRange)document.getElementById('date-range').value=p.dateRange;
+            if(p.start)document.getElementById('sel-start').value=p.start;
+            if(p.end)document.getElementById('sel-end').value=p.end;
+            if(p.lookahead)document.getElementById('sel-lookahead').value=p.lookahead;
+            setTimeout(loadData,100);
+        }catch(e){}
+    }
+})();

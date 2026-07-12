@@ -10,7 +10,10 @@ let latestTimer = null;
 let realtimeMode = false;
 let realtimeStart = 0;
 let realtimeTimer = null;
-let highlightFilter = null; // {type:'reason'|'score', value:'止损'|'止盈'|'时间到'|30|40|...}
+let highlightFilter = null;
+let loadAbort = null; // 取消上一次回测请求
+let progTimer = null; // 进度条定时器
+let loadCount = 0; // 回测次数统计
 
 // 加载保存的仓位设置
 (function(){
