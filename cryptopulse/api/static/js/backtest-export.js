@@ -37,27 +37,8 @@ function exportCSV(){
     const ts=now.getFullYear()
         +String(now.getMonth()+1).padStart(2,'0')+String(now.getDate()).padStart(2,'0')+'_'
         +String(now.getHours()).padStart(2,'0')+String(now.getMinutes()).padStart(2,'0')+String(now.getSeconds()).padStart(2,'0');
-    // 构建HTML — 全部用表格，Excel打开不乱
-    let html='<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>回测数据</x:Name></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body>';
-    // 汇总部分：用两列表格
-    html+='<table><col width="120"><col width="100">';
-    csv.split('\n').filter(s=>s.trim()).forEach(line=>{
-        const idx=line.indexOf(',');
-        if(idx>0){
-            html+='<tr><td style="border:1px solid #ccc;padding:2px 4px">'+line.slice(0,idx)+'</td><td style="border:1px solid #ccc;padding:2px 4px">'+line.slice(idx+1)+'</td></tr>';
-        }else{
-            html+='<tr><td style="border:1px solid #ccc;padding:2px 4px;text-align:center" colspan="2"><b>'+line+'</b></td></tr>';
-        }
-    });
-    html+='</table><br>';
-    // 信号明细表格
-    const colWidths=[6,16.5,8,8,8,8,8,8,5,5,22.5,8,8,8,8,5,6,4,23];
-    html+='<table x:str><colgroup>';
-    colWidths.forEach(w=>{html+='<col width="'+w+'">';});
-    html+='</colgroup><thead><tr>';
-    const hdrs=['#','time','price','open','high','low','volume','direction','score','confidence','reason','entry_price','sl_price','exit_price','exit_reason','correct','pnl_pct','保本','风控原因'];
-    hdrs.forEach(h=>{html+='<th style="border:1px solid #ccc;padding:2px 4px;text-align:center">'+h+'</th>';});
-    html+='</tr></thead><tbody>';
+    // 信号明细CSV
+    csv+='#,time,price,open,high,low,volume,direction,score,confidence,reason,entry_price,sl_price,exit_price,exit_reason,correct,pnl_pct,保本,风控原因\n';
     const tradeMap={};
     trades.forEach(t=>{tradeMap[t.timestamp]=t;});
     let sigIdx=0;
@@ -68,33 +49,22 @@ function exportCSV(){
         const tr=tradeMap[c.t];
         const timeStr=new Date(c.t).toISOString().slice(0,19).replace('T',' ');
         const reason=(t.reason||'').replace(/,/g,';');
-        html+='<tr>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+sigIdx+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+timeStr+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+c.c.toFixed(1)+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+c.o.toFixed(1)+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+c.h.toFixed(1)+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+c.l.toFixed(1)+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+c.v+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+t.direction+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+t.score+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+t.confidence+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+reason+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?tr.entry_price:'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?tr.sl_price:'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?tr.exit_price:'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?tr.exit_reason:'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?(tr.correct?'Y':'N'):'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?((tr.pnl_pct>=0?'+':'')+tr.pnl_pct+'%'):'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(tr?(Math.abs(tr.pnl_pct)>=fee*2*100?'已触发':'未触发'):'')+'</td>'
-            +'<td style="border:1px solid #ccc;padding:2px 4px">'+(t.risk_reason||'')+'</td>'
-            +'</tr>';
+        const row=[
+            sigIdx,timeStr,c.c.toFixed(1),c.o.toFixed(1),c.h.toFixed(1),c.l.toFixed(1),c.v,
+            t.direction,t.score,t.confidence,reason,
+            tr?tr.entry_price:'',tr?tr.sl_price:'',tr?tr.exit_price:'',
+            tr?tr.exit_reason:'',tr?(tr.correct?'Y':'N'):'',
+            tr?((tr.pnl_pct>=0?'+':'')+tr.pnl_pct+'%'):'',
+            tr?(Math.abs(tr.pnl_pct)>=fee*2*100?'已触发':'未触发'):'',
+            t.risk_reason||''
+        ];
+        csv+=row.join(',')+'\n';
     });
-    html+='</tbody></table></body></html>';
-    const blob=new Blob(['\uFEFF'+html],{type:'application/vnd.ms-excel;charset=utf-8'});
+    // 下载CSV
+    const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'});
     const a=document.createElement('a');
     a.href=URL.createObjectURL(blob);
-    a.download='backtest_'+currentStyle+'_'+ts+'.xls';
+    a.download='backtest_'+currentStyle+'_'+ts+'.csv';
     a.click();
     URL.revokeObjectURL(a.href);
 }
