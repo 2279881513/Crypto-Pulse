@@ -190,7 +190,7 @@ def _compute_signal(i,close,high,low,openp,vol,
     # ---- 成交量确认 ----
     vol_ma20 = all_vol_ma20[i] if all_vol_ma20 is not None and all_vol_ma20[i] > 0 else None
     vol_ratio = vol[i] / vol_ma20 if vol_ma20 else 1.0
-    vol_confirm = vol_ratio > 1.5
+    vol_confirm = vol_ratio > 2.0
 
     # ---- ATR 参考 ----
     atr_v = all_atr[i] if all_atr is not None and not np.isnan(all_atr[i]) else (c * 0.005)
@@ -504,7 +504,7 @@ def api_backtest():
                         sl_price = max(sl_price, entry_price)
                     # 到达成本价后，SL 跟随价格（ATR×1.0 追踪）
                     if sl_price >= entry_price:
-                        sl_price = max(sl_price, bar_high - atr_entry * 1.5)
+                        sl_price = max(sl_price, bar_high - atr_entry * 2.0)
                     # 先检查止盈
                     if bar_high >= tp_price:
                         exit_price = tp_price
