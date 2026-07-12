@@ -103,6 +103,11 @@
         <label style="font-size:9px;color:#525f7a;cursor:pointer;display:flex;align-items:center;gap:2px" title="过滤掉利润不够扣手续费的低质量信号">
             <input type="checkbox" id="chk-fee-filter" checked style="width:10px;height:10px;cursor:pointer">保本
         </label>
+        <label style="font-size:9px;color:#525f7a;cursor:pointer;display:flex;align-items:center;gap:2px" title="止损后暂停交易一段时间">
+            <input type="checkbox" id="chk-sl-cooldown" checked style="width:10px;height:10px;cursor:pointer">冷却
+        </label>
+        <input id="sl-cooldown-min" type="text" inputmode="numeric" value="5" style="width:24px;background:#0b0e17;border:1px solid #1e2a45;border-radius:3px;color:#e8edf5;padding:1px 2px;font-size:9px;font-family:'Courier New',monospace;outline:none">
+        <span style="font-size:8px;color:#525f7a">分</span>
         <span id="st-pnl-net" style="color:#525f7a;font-size:10px"></span>
     </div>
 </div>

@@ -22,6 +22,8 @@ let loadCount = 0; // 回测次数统计
         if(s.capital)document.getElementById('pos-capital').value=s.capital;
         if(s.leverage)document.getElementById('pos-leverage').value=s.leverage;
         if(s.feeRate)document.getElementById('pos-fee').value=s.feeRate;
+        if(s.slCooldownMin)document.getElementById('sl-cooldown-min').value=s.slCooldownMin;
+        if(s.slCooldownEnabled!==undefined)document.getElementById('chk-sl-cooldown').checked=s.slCooldownEnabled;
     }catch(e){}
 })();
 

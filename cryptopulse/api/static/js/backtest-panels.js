@@ -69,6 +69,10 @@ function loadData(){
     if(realtimeMode)url+='&trade_start='+realtimeStart;
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
+    const feeFilter=document.getElementById('chk-fee-filter').checked?'1':'0';
+    url+='&fee_filter='+feeFilter;
+    url+='&sl_cooldown='+(parseInt(document.getElementById('sl-cooldown-min').value)||5)*60;
+    url+='&sl_cooldown_enabled='+(document.getElementById('chk-sl-cooldown').checked?'1':'0');
     // 设置请求超时（超过300秒自动取消）
     const timeoutId=setTimeout(()=>ac.abort(), 300000);
     const xhr=new XMLHttpRequest();
@@ -147,6 +151,8 @@ function fmtPct(a,b){try{var r=((Number(a)/Number(b))-1)*100;return isNaN(r)?'':
             capital:parseFloat(document.getElementById('pos-capital').value)||1000,
             leverage:parseFloat(document.getElementById('pos-leverage').value)||1,
             feeRate:document.getElementById('pos-fee').value,
+            slCooldownMin:document.getElementById('sl-cooldown-min').value,
+            slCooldownEnabled:document.getElementById('chk-sl-cooldown').checked,
         }));
         // 更新净利显示
         if(typeof stats!=='undefined'&&stats&&stats.total_trades){

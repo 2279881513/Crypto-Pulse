@@ -315,6 +315,9 @@ def api_backtest():
         fee_filter = request.args.get("fee_filter", "0", type=str) == "1"
         # 实时模式：只统计此时间戳之后的交易
         trade_start_ms = request.args.get("trade_start", 0, type=int)
+        # 止损冷却控制
+        sl_cooldown_ms = request.args.get("sl_cooldown", 300, type=int) * 1000  # 秒→毫秒
+        sl_cooldown_enabled = request.args.get("sl_cooldown_enabled", "1", type=str) == "1"
         # 导出模式：跳过K线数据生成，只返回交易数据
         csv_export = request.args.get("format") == "csv"
         raw_export = request.args.get("raw") == "1"
@@ -435,7 +438,6 @@ def api_backtest():
 
         trades = []
         sl_cooldown_until = 0  # 止损冷却截止时间戳（毫秒）
-        sl_cooldown_ms = 300 * 1000  # 5分钟
         sl_cooldown_zones = []  # 收集冷却区间用于画线
         # 连续亏损保护
         max_consecutive_losses = 3  # 连续亏损N次后暂停该方向交易
@@ -456,7 +458,7 @@ def api_backtest():
                     continue
 
             # ---- 止损冷却检查 ----
-            if entry_ts < sl_cooldown_until:
+            if sl_cooldown_enabled and entry_ts < sl_cooldown_until:
                 # 在冷却期内，跳过此交易，标记风控原因
                 sig["risk_blocked"] = True
                 remaining_s = (sl_cooldown_until - entry_ts) // 1000
@@ -581,6 +583,14 @@ def api_backtest():
             else:
                 cons_losses[dir_str] += 1
                 cons_losses[other_dir] = 0  # 另一方归零
+
+        # ---- 传播风控标记到所有信号（用于K线图橙色箭头）----
+        for item in all_signals:
+            sig = item["sig"]
+            if sig.get("cooled"):
+                sig["risk_blocked"] = True
+                sig["risk_reason"] = "同方向冷却间隔不足"
+            # 已在回测循环中被设置为risk_blocked的信号保持原样
 
         # ---- 更新连续亏损计数 ----
         # ---- 汇总统计 ----
@@ -794,6 +804,8 @@ def api_backtest():
             "all_signals": [{"ts":s["ts"],"direction":s["sig"]["direction"],"score":s["sig"]["score"],"confidence":s["sig"]["confidence"],"reason":s["sig"]["reason"]} for s in all_signals],
             "prediction": prediction,
             "sl_cooldown_zones": sl_cooldown_zones,
+            "sl_cooldown_ms": sl_cooldown_ms,
+            "sl_cooldown_enabled": sl_cooldown_enabled,
         })
 
     except Exception as e:
