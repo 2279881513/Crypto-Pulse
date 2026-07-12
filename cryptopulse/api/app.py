@@ -162,8 +162,9 @@ def _compute_signal(i,close,high,low,openp,vol,
     is_ob = not np.isnan(rsi_v) and rsi_v >= 70
     at_bb_lower = not np.isnan(bb_u) and price <= bb_l + (bb_m - bb_l) * 0.3
     at_bb_upper = not np.isnan(bb_u) and price >= bb_u - (bb_u - bb_m) * 0.3
-    ema_trend_up = not np.isnan(ema_f) and price > ema_f
-    ema_trend_down = not np.isnan(ema_f) and price < ema_f
+    # 三条EMA排列一致性（更严格的趋势方向判断）
+    ema_bullish = not np.isnan(ema_f) and ema_f > ema_m > ema_s
+    ema_bearish = not np.isnan(ema_f) and ema_f < ema_m < ema_s
     if is_oversold and at_bb_lower and adx_l >= 10:
         d="bullish"; total_score=60
     # 做空：ADX>45时强趋势中不做空（用户数据：仅33%成功率）
@@ -175,10 +176,11 @@ def _compute_signal(i,close,high,low,openp,vol,
     if d!="neutral" and cf<35: d="neutral"
     # === 强趋势方向保护：ADX>45时只允许顺势交易 ===
     # 防止在强下跌趋势中抄底、强上涨趋势中摸顶
+    # 使用三条EMA排列判断趋势方向（EMA5>EMA13>EMA21=多头，反之为空头）
     if d != "neutral" and adx_l > 45:
-        if d == "bullish" and ema_trend_down:
+        if d == "bullish" and not ema_bullish:
             d = "neutral"
-        elif d == "bearish" and ema_trend_up:
+        elif d == "bearish" and not ema_bearish:
             d = "neutral"
     # === 极端趋势保护：ADX>80不开新仓 ===
     # 极端单边行情中任何入场风险极高
@@ -396,12 +398,23 @@ def api_backtest():
         sl_cooldown_until = 0  # 止损冷却截止时间戳（毫秒）
         sl_cooldown_ms = 300 * 1000  # 5分钟
         sl_cooldown_zones = []  # 收集冷却区间用于画线
+        # 连续亏损保护
+        max_consecutive_losses = 3  # 连续亏损N次后暂停该方向交易
+        cons_losses = {"bullish": 0, "bearish": 0}  # 各方向连续亏损计数
 
         for sr in signals_raw:
             idx = sr["idx"]
             sig = sr["sig"]
             entry_price = sr["price"]
             entry_ts = sr["ts"]
+            dir_str = sig.get("direction", "")
+
+            # ---- 连续亏损保护 ----
+            if dir_str in ("bullish", "bearish"):
+                if cons_losses[dir_str] >= max_consecutive_losses:
+                    sig["risk_blocked"] = True
+                    sig["risk_reason"] = f"连续{max_consecutive_losses}次亏损，暂停{dir_str}方向"
+                    continue
 
             # ---- 止损冷却检查 ----
             if entry_ts < sl_cooldown_until:
@@ -424,8 +437,8 @@ def api_backtest():
             # ---- 止盈止损: ATR ----
             atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else close[idx] * 0.005
             # 止盈 = 入场价 + n × ATR, 其中n为风险系数(通常2-3)
-            risk_n = 3.0
-            sl_mult = 2.0
+            risk_n = 2.0
+            sl_mult = 1.5
             tp_mult = risk_n
             if is_bullish:
                 sl_price = entry_price - atr_entry * sl_mult
@@ -513,6 +526,14 @@ def api_backtest():
                 "pnl_pct": round(pnl_pct, 2),
                 "exit_reason": exit_reason,
             })
+            # 更新连续亏损计数（用于连续亏损保护）
+            other_dir = "bearish" if dir_str == "bullish" else "bullish"
+            if correct:
+                cons_losses[dir_str] = 0
+                cons_losses[other_dir] = 0  # 任意方向盈利时清零双方
+            else:
+                cons_losses[dir_str] += 1
+                cons_losses[other_dir] = 0  # 另一方归零
 
         # ---- 实时模式过滤：只统计 trade_start 之后的交易 ----
         # ---- 汇总统计 ----
@@ -591,8 +612,8 @@ def api_backtest():
                 # 方向对应的SL/TP — 根据5m ADX动态调整
                 atr_entry = all_atr[idx] if not np.isnan(all_atr[idx]) else p * 0.005
                 # 止盈 = 入场价 + n × ATR
-                risk_n = 3.0
-                sl_mult_sig = 2.0
+                risk_n = 2.0
+                sl_mult_sig = 1.5
                 tp_mult_sig = risk_n
                 bull_sl = entry_price - atr_entry * sl_mult_sig
                 bull_tp = entry_price + atr_entry * tp_mult_sig
