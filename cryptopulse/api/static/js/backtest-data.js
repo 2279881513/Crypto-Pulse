@@ -80,7 +80,7 @@ function silentReload(){
     const end=document.getElementById('sel-end').value;
     const dateRange=parseDateRange(document.getElementById('date-range'));
     let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&_t='+Date.now();
-    if(realtimeMode)url+='&trade_start='+realtimeStart;
+    // 实时模式：不过滤 trade_start（原逻辑导致数据末端无信号）
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);}
     else if(start){url+='&start='+start;}
     fetch(url).then(r=>r.json()).then(d=>{

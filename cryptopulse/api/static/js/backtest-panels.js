@@ -1,12 +1,4 @@
 function loadData(){
-    // 非首次回测：保存参数后刷新页面，避免浏览器连接池耗尽
-    if(loadCount>0){
-        const params={style:currentStyle,lookahead:document.getElementById('sel-lookahead').value,start:document.getElementById('sel-start').value,end:document.getElementById('sel-end').value,dateRange:document.getElementById('date-range').value};
-        sessionStorage.setItem('bk_params',JSON.stringify(params));
-        location.reload();
-        return;
-    }
-    loadCount++;
     // 停止自动刷新定时器，避免干扰
     if(latestTimer){clearInterval(latestTimer);latestTimer=null;}
     if(realtimeTimer){clearInterval(realtimeTimer);realtimeTimer=null;}
@@ -66,7 +58,8 @@ function loadData(){
         }
     },300);
     let url='/api/backtest?style='+currentStyle+'&lookahead='+lookahead+'&_t='+Date.now();
-    if(realtimeMode)url+='&trade_start='+realtimeStart;
+    // 实时模式下不传 trade_start（原逻辑 trade_start=Date.now() 导致数据末端信号被过滤）
+    // 改用7天数据预热，不过滤信号
     if(dateRange){url+='&start='+encodeURIComponent(dateRange.start);url+='&end='+encodeURIComponent(dateRange.end);}
     else{if(start)url+='&start='+start;if(!latestMode&&end)url+='&end='+end;}
     const feeFilter=document.getElementById('chk-fee-filter').checked?'1':'0';

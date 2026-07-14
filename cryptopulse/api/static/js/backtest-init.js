@@ -13,7 +13,6 @@ let realtimeTimer = null;
 let highlightFilter = null;
 let loadAbort = null; // 取消上一次回测请求
 let progTimer = null; // 进度条定时器
-let loadCount = 0; // 回测次数统计
 
 // 加载保存的仓位设置
 (function(){
